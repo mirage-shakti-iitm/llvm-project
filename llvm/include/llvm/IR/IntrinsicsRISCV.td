@@ -66,3 +66,27 @@ let TargetPrefix = "riscv" in {
   defm int_riscv_masked_cmpxchg : MaskedAtomicRMWFiveArgIntrinsics;
 
 } // TargetPrefix = "riscv"
+
+//===----------------------------------------------------------------------===//
+// Shakti-Compartments intrinsics
+//===----------------------------------------------------------------------===//
+
+let TargetPrefix = "riscv" in {
+  def int_riscv_checkcap : GCCBuiltin<"__builtin_riscv_checkcap">,
+                                        Intrinsic<[], [llvm_i16_ty], [ImmArg<ArgIndex<0>>]>;
+}
+
+let TargetPrefix = "riscv" in {
+  def int_riscv_validate : //GCCBuiltin<"__builtin_riscv_validate">,
+          Intrinsic<[],  // return type
+                          [llvm_i64_ty,llvm_i64_ty],  // two 32 bit integer as parameter
+                          []>; // name or description
+}
+
+let TargetPrefix = "riscv" in {
+def int_riscv_hash : GCCBuiltin<"__builtin_riscv_hash">,
+          Intrinsic<[llvm_i64_ty],            // return 32 bit hash
+                          [llvm_ptr_ty],   // address to store cookie at
+                          []>;                 // properties: nothing 
+                          //"llvm.riscv.hash">; // name or description
+}

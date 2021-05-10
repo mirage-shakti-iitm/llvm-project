@@ -809,6 +809,7 @@ class PatGprUimmLog2XLen<SDPatternOperator OpNode, RVInstIShift Inst>
     : Pat<(OpNode GPR:$rs1, uimmlog2xlen:$shamt),
           (Inst GPR:$rs1, uimmlog2xlen:$shamt)>;
 
+
 /// Predicates
 
 def IsOrAdd: PatFrag<(ops node:$A, node:$B), (or node:$A, node:$B), [{
@@ -1178,3 +1179,43 @@ include "RISCVInstrInfoD.td"
 include "RISCVInstrInfoC.td"
 include "RISCVInstrInfoB.td"
 include "RISCVInstrInfoV.td"
+
+//===----------------------------------------------------------------------===//
+// Shakti-Compartment intrinsics
+//===----------------------------------------------------------------------===//
+// class PseudoMaskedAMOPat<Intrinsic intrin, Pseudo AMOInst>
+//     : Pat<(intrin GPR:$addr, GPR:$incr, GPR:$mask, timm:$ordering),
+//           (AMOInst GPR:$addr, GPR:$incr, GPR:$mask, timm:$ordering)>;
+
+// class PseudoMaskedAMOMinMaxPat<Intrinsic intrin, Pseudo AMOInst>
+//     : Pat<(intrin GPR:$addr, GPR:$incr, GPR:$mask, GPR:$shiftamt,
+//            timm:$ordering),
+//           (AMOInst GPR:$addr, GPR:$incr, GPR:$mask, GPR:$shiftamt,
+//            timm:$ordering)>;
+           
+class PatSimm12<Intrinsic intrin, CheckcapInst Inst>
+    : Pat<(intrin simm12:$imm12), (Inst simm12:$imm12)>;
+
+// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+// def CHECKCAP : RVInstI<0b000, OPC_CUSTOM, (outs), (ins simm12:$imm12), "checkcap", "$imm12">,
+//              Sched<[]> {
+//   let rs1 = 0;
+//   let rd = 0;
+// }
+
+// def : PatSimm12<int_riscv_checkcap, CHECKCAP>;
+
+// def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>,  Sched<[]>;
+
+// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+def CHECKCAP : CheckcapInst<(outs), (ins simm12:$imm12), "checkcap", "$imm12", [(set (int_riscv_checkcap simm12:$imm12))]>,  Sched<[]>;
+def : PatSimm12<int_riscv_checkcap, CHECKCAP>;
+
+
+// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+// def VAL : ValInst<(outs), (ins GPR:$rd, GPR:$rs1 ), "val", "$rd, $rs1", [(set (int_riscv_validate GPR:$rd, GPR:$rs1))]>, Sched<[]>;
+
+// def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>,  Sched<[]>;
+
+// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+// def CHECKCAP : CheckcapInst<OPC_CUSTOM, (outs), (ins simm12:$imm12), "checkcap", "$imm12", [(set (int_riscv_checkcap simm12:$imm12))]>, Sched<[]>; 

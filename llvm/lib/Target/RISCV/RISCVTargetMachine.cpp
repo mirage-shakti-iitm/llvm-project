@@ -30,7 +30,18 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
+
+#include "llvm/Support/CommandLine.h"
+
 using namespace llvm;
+
+static cl::opt<bool>
+    EnableCompartmentPass("enable-compartment-pass",
+                 cl::desc("Enable-Compartments Pass"), cl::init(false), cl::Hidden);
+
+// static cl::opt<std::string>
+    // InputDir("input-capfile-dir"),
+      // cl::desc("Directory where corressponding capfiles are located"), cl::Hidden);
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   RegisterTargetMachine<RISCVTargetMachine> X(getTheRISCV32Target());
@@ -172,12 +183,39 @@ void RISCVPassConfig::addPreSched2() {}
 
 void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
 
+// void initialize_cap_file(){
+//   fstream cap_file;
+
+// 	cap_file.open("my_file.txt", ios::in);
+// 	if (!my_file) {
+// 		cout << "No such file";
+// 	}
+// 	else {
+// 		char ch;
+
+// 		while (1) {
+// 			my_file >> ch;
+// 			if (my_file.eof())
+// 				break;
+
+// 			cout << ch;
+// 		}
+
+// 	}
+// 	my_file.close();
+// 	return 0;
+// }
+
 void RISCVPassConfig::addPreEmitPass2() {
   addPass(createRISCVExpandPseudoPass());
   // Schedule the expansion of AMOs at the last possible moment, avoiding the
   // possibility for other passes to break the requirements for forward
   // progress in the LR/SC block.
   addPass(createRISCVExpandAtomicPseudoPass());
+  if(EnableCompartmentPass == 1){
+    // initialize_cap_file();
+    addPass(createRISCVExpandCheckcapPseudoPass());
+  }
 }
 
 void RISCVPassConfig::addPreRegAlloc() {

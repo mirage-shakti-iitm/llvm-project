@@ -21,6 +21,7 @@ add_llvm_target(RISCVCodeGen
   RISCVCallLowering.cpp
   RISCVExpandAtomicPseudoInsts.cpp
   RISCVExpandPseudoInsts.cpp
+  MachinePassCheckcap.cpp
   RISCVFrameLowering.cpp
   RISCVInstrInfo.cpp
   RISCVInstructionSelector.cpp

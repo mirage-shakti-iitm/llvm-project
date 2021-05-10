@@ -272,6 +272,9 @@ bool RISCVTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
                                              MachineFunction &MF,
                                              unsigned Intrinsic) const {
   switch (Intrinsic) {
+  case Intrinsic::riscv_checkcap:
+    errs() << "\nHELLO in RTL\n";
+    errs() << I << "\n";
   default:
     return false;
   case Intrinsic::riscv_masked_atomicrmw_xchg_i32:
