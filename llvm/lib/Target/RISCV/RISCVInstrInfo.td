@@ -1181,5 +1181,5 @@ include "RISCVInstrInfoV.td"
 
 
 /* Shakti-MS Intructions/Intrinsics */
-def VAL : ValInst<(outs), (ins GPR:$rd, GPR:$rs1 ), "val", "$rd, $rs1", [(set (int_riscv_validate GPR:$rd, GPR:$rs1))]>, Sched<[]>;
+def VAL : ValInst<(outs), (ins GPR:$rs2, GPR:$rs1 ), "val", "$rs2, $rs1", [(set (int_riscv_validate GPR:$rs2, GPR:$rs1))]>, Sched<[]>;
 def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>, Sched<[]>;

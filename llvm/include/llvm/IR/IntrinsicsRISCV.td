@@ -81,7 +81,7 @@ let TargetPrefix = "riscv" in {
 let TargetPrefix = "riscv" in {
 def int_riscv_hash : GCCBuiltin<"__builtin_riscv_hash">,
           Intrinsic<[llvm_i64_ty],            // return 32 bit hash
-                          [llvm_ptr_ty],   // address to store cookie at
+                          [llvm_i64ptr_ty],   // address to store cookie at
                           []>;                 // properties: nothing 
                           //"llvm.riscv.hash">; // name or description
 }

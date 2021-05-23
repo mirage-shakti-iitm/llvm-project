@@ -339,10 +339,11 @@ class ValInst<dag outs, dag ins, string opcodestr, string argstr, list<dag> patt
   bits<5> rs1;
   bits<5> rs2;
 
-  let Inst{31-20} = 0;
+  let Inst{31-25} = 0;
+  let Inst{24-20} = rs2;
   let Inst{19-15} = rs1;
-  let Inst{14-12} = 0;
-  let Inst{11-7} = rs2;
+  let Inst{14-12} = 2;
+  let Inst{11-7} = 0;
   let Inst{6-2} = 10;
   let Inst{1-0} = 3;
 }
@@ -351,12 +352,12 @@ class HashInst<dag outs, dag ins, string opcodestr, string argstr, list<dag> pat
   : RVInst<outs, ins, opcodestr, argstr, pattern, InstFormatI> {
   let Pattern = pattern;
   bits<5> rs1;
-  bits<5> rs2;
+  bits<5> rd;
 
   let Inst{31-20} = 0;
   let Inst{19-15} = rs1;
-  let Inst{14-12} = 0;
-  let Inst{11-7} = rs2;
+  let Inst{14-12} = 2;
+  let Inst{11-7} = rd;
   let Inst{6-2} = 2;
   let Inst{1-0} = 3;
 }

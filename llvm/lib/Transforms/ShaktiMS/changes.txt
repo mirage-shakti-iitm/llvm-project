@@ -1,0 +1,34 @@
+1). Changed CallSite.h to AbstractCallSite.h
+    error: ‘CallSite.h’ not present
+    https://github.com/llvm/llvm-project/commit/2c24051bacd2d0eb7141fc4adb870281aec4e714
+
+2). Changed CallInst->getCalledValue() to CallInst->getCalledOperand()
+    https://reviews.llvm.org/D78882
+
+3). Instead of using Callsite, directly used the CallInst, which was used eventually in the original version.
+    error: ‘CallSite’ was not declared in this scope
+
+4). Add .getCallee() at end of getOrInsertFuncton() to convert FunctionCallee to Value*
+    cannot convert ‘llvm::FunctionCallee’ to ‘llvm::Value*’
+    https://github.com/sampsyo/llvm-pass-skeleton/issues/19
+
+5). Commented out TerInst usage
+    error: ‘TerminatorInst’ was not declared in this scope
+    https://lists.llvm.org/pipermail/llvm-dev/2018-May/123407.html
+
+6). Two cases alone removed .getCallee() as FunctionCallee used in op->setCalledFunction()
+    error: invalid conversion from ‘llvm::Value*’ to ‘llvm::Function*
+        op->setCalledFunction (safemallocFunc);
+    error: no such function CreateCall(Value*, ) present
+        CallInst::CreateCall(randomF)
+     
+7). Included llvmIR/IntrinsicsRISCV.h
+    error: riscv_hash, riscv_validate intrinsics not defined
+
+8). C++ std::set<std::string>::insert(F.getName()) changed to std::set<std::string>::insert(F.getName().str())
+    Error: Cannot insert LLVM:StringRef into set<std::string>
+    Also related errors: Where all std::string used in Vectors, Maps etc... there all StringRef is converted to String using LLVM::StringRef::str()
+    https://github.com/google/autofdo/issues/87
+    https://github.com/google/autofdo/pull/90
+
+9). 
