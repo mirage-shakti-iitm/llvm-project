@@ -16,9 +16,10 @@
 #include <set>
 
 #include "llvm/Support/CommandLine.h"
-
-//#define debug_spass
-//#define debug_spass_dmodule
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#define debug_spass
+// #define debug_spass_dmodule
 
 using namespace llvm;
 
@@ -448,7 +449,7 @@ namespace {
 			#ifdef debug_spass
 				errs()<<"Second pass done\n";
 			#endif
-			
+			errs()<<"Second pass donsaae\n";
 			// m->replaceAllUsesWith(funcy)
 			dyn_cast<Function>(mallocFunc)->dropAllReferences();
 			dyn_cast<Function>(freeFunc)->dropAllReferences();
@@ -505,7 +506,7 @@ namespace {
 							FPR = AI; //no alloca inst is there. only printf. then insert before printf
 */
 						FPR = AI;
-						//errs() << *I << "\n" ;
+						// errs() << *I << "\n";
 						st_cook = new AllocaInst(Type::getInt64Ty(Ctx), 0,"stack_cookie", FPR);	// alloca stack cookie
 						ptr_to_st_cook = new PtrToIntInst(st_cook,Type::getInt32Ty(Ctx), "stack_cookie_32", FPR);
 						CallInst *getRandom = CallInst::Create (randomF, "", FPR);
@@ -2119,4 +2120,9 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 
 
 char shaktiPass::ID = 0;
-static RegisterPass<shaktiPass> X("t", "Shakti-T transforms");
+static RegisterPass<shaktiPass> X("sms", "Shakti-T transforms");
+
+static RegisterStandardPasses Y(
+    PassManagerBuilder::EP_EnabledOnOptLevel0,
+    [](const PassManagerBuilder &Builder,
+       legacy::PassManagerBase &PM) { PM.add(new shaktiPass()); });
