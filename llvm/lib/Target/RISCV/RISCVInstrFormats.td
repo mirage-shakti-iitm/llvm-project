@@ -379,18 +379,19 @@ class CheckcapInst<dag outs, dag ins, string opcodestr, string argstr, list<dag>
 //   let Opcode = opcode.Value;
 // }
 // def riscv_validate : ValInst<(outs), (ins GPR64:$rd, GPR64:$rs1 ), "val", "\t$rd, $rs1", [(set (int_riscv_validate GPR64:$rd, GPR64:$rs1))]>;
+
+/* Shakti-MS Intructions/Intrinsics */
 class ValInst<dag outs, dag ins, string opcodestr, string argstr, list<dag> pattern>
   : RVInst<outs, ins, opcodestr, argstr, pattern, InstFormatI> {
   let Pattern = pattern;
-  //let CodeSize = 3;
-  //bits<12> imm12;
   bits<5> rs1;
   bits<5> rs2;
 
-  let Inst{31-20} = 0;
+  let Inst{31-25} = 0;
+  let Inst{24-20} = rs2;
   let Inst{19-15} = rs1;
-  let Inst{14-12} = 0;
-  let Inst{11-7} = rs2;
+  let Inst{14-12} = 2;
+  let Inst{11-7} = 0;
   let Inst{6-2} = 10;
   let Inst{1-0} = 3;
 }
@@ -398,18 +399,13 @@ class ValInst<dag outs, dag ins, string opcodestr, string argstr, list<dag> patt
 class HashInst<dag outs, dag ins, string opcodestr, string argstr, list<dag> pattern>
   : RVInst<outs, ins, opcodestr, argstr, pattern, InstFormatI> {
   let Pattern = pattern;
-  //let CodeSize = 3;
-  //bits<12> imm12;
   bits<5> rs1;
-  bits<5> rs2;
-  //bits<5> rd;
-
-  // field bits<32> Inst;
+  bits<5> rd;
 
   let Inst{31-20} = 0;
   let Inst{19-15} = rs1;
-  let Inst{14-12} = 0;
-  let Inst{11-7} = rs2;
+  let Inst{14-12} = 2;
+  let Inst{11-7} = rd;
   let Inst{6-2} = 2;
   let Inst{1-0} = 3;
 }

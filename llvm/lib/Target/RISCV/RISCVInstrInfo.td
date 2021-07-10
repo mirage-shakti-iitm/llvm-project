@@ -1205,17 +1205,17 @@ class PatSimm12<Intrinsic intrin, CheckcapInst Inst>
 
 // def : PatSimm12<int_riscv_checkcap, CHECKCAP>;
 
-// def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>,  Sched<[]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 def CHECKCAP : CheckcapInst<(outs), (ins simm12:$imm12), "checkcap", "$imm12", [(set (int_riscv_checkcap simm12:$imm12))]>,  Sched<[]>;
 def : PatSimm12<int_riscv_checkcap, CHECKCAP>;
 
 
-// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
-// def VAL : ValInst<(outs), (ins GPR:$rd, GPR:$rs1 ), "val", "$rd, $rs1", [(set (int_riscv_validate GPR:$rd, GPR:$rs1))]>, Sched<[]>;
-
-// def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>,  Sched<[]>;
 
 // let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 // def CHECKCAP : CheckcapInst<OPC_CUSTOM, (outs), (ins simm12:$imm12), "checkcap", "$imm12", [(set (int_riscv_checkcap simm12:$imm12))]>, Sched<[]>; 
+
+
+/* Shakti-MS Intructions/Intrinsics */
+def VAL : ValInst<(outs), (ins GPR:$rs2, GPR:$rs1 ), "val", "$rs2, $rs1", [(set (int_riscv_validate GPR:$rs2, GPR:$rs1))]>, Sched<[]>;
+def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>, Sched<[]>;
