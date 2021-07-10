@@ -183,28 +183,29 @@ void RISCVPassConfig::addPreSched2() {}
 
 void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
 
-// void initialize_cap_file(){
-//   fstream cap_file;
+/*
+void initialize_cap_file(){
+  fstream cap_file;
 
-// 	cap_file.open("my_file.txt", ios::in);
-// 	if (!my_file) {
-// 		cout << "No such file";
-// 	}
-// 	else {
-// 		char ch;
+	cap_file.open("my_file.txt", ios::in);
+	if (!my_file) {
+		cout << "No such file";
+	}
+	else {
+		char ch;
 
-// 		while (1) {
-// 			my_file >> ch;
-// 			if (my_file.eof())
-// 				break;
+		while (1) {
+			my_file >> ch;
+			if (my_file.eof())
+				break;
 
-// 			cout << ch;
-// 		}
+			cout << ch;
+		}
 
-// 	}
-// 	my_file.close();
-// 	return 0;
-// }
+	}
+	my_file.close();
+	return 0;
+}*/
 
 void RISCVPassConfig::addPreEmitPass2() {
   addPass(createRISCVExpandPseudoPass());

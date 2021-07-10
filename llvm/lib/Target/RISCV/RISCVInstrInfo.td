@@ -1207,7 +1207,7 @@ class PatSimm12<Intrinsic intrin, CheckcapInst Inst>
 
 // def HASH : HashInst<(outs GPR:$rd), (ins GPR:$rs1), "hash", "$rd, $rs1", [(set GPR:$rd, (int_riscv_hash GPR:$rs1))]>,  Sched<[]>;
 
-// let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 def CHECKCAP : CheckcapInst<(outs), (ins simm12:$imm12), "checkcap", "$imm12", [(set (int_riscv_checkcap simm12:$imm12))]>,  Sched<[]>;
 def : PatSimm12<int_riscv_checkcap, CHECKCAP>;
 

@@ -13,29 +13,64 @@
 #include "RISCV.h"
 #include "RISCVInstrInfo.h"
 #include "RISCVTargetMachine.h"
-
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-
 #include "llvm/Support/CommandLine.h"
+#include "llvm/IR/Module.h"
+#include "llvm/ADT/StringRef.h"
+#include <map>
+#include <fstream>
 
 using namespace llvm;
 
-int glb = 20;
 bool status  = 0;
+
+std::map <std::string, uint8_t> compartment_function_map;
+uint8_t default_compartment = 266; // currently 0-255 valid compartment range
+
+static cl::opt<std::string> CapFilePath(
+    "cap-file-path",
+    cl::desc("Write to given path after running pass"),
+    cl::Hidden);
+
 
 #define RISCV_EXPAND_CHECKCAP_PSEUDO_NAME "RISCV pseudo instruction expansion pass"
 
-static cl::opt<std::string>
-    InputFileName("checkcap-file-name",
-                 cl::desc("Print architectural register names rather than the "
-                          "ABI names (such as x2 instead of sp)"), cl::Hidden);
-
-
 
 namespace {
+
+void initialize_compartment_map(std::string source_filename_with_ext){
+  if (!CapFilePath.empty()) {
+    errs()<<CapFilePath<<"\n";
+    std::string cap_filename(CapFilePath);
+    cap_filename.append("/");
+    std::string source_filename = source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of("."));
+    cap_filename.append(source_filename);
+    cap_filename.append(".cap");
+    std::ifstream CapFile;
+    CapFile.open(cap_filename);
+    std::string myText;
+    bool default_set = 0;
+    // Use a while loop together with the getline() function to read the file line by line
+    if(CapFile){
+      while (getline (CapFile, myText)) {
+        if(default_set == 0){
+          std::size_t pos = myText.find_last_of(":");
+          if(pos == std::string::npos){
+            default_compartment = std::stoi(myText);
+         }
+         default_set = 1;
+        }
+        std::string function_name = myText.substr(0, myText.find_last_of(":"));
+        uint8_t compartment_id = std::stoi(myText.substr(myText.find_last_of(":")+1));
+        compartment_function_map.insert(std::pair<std::string, uint8_t>(function_name, compartment_id)); 
+      }
+    }
+    CapFile.close();
+  }
+}
 
 class RISCVExpandCheckcapPseudo : public MachineFunctionPass {
 public:
@@ -57,25 +92,6 @@ public:
 
 char RISCVExpandCheckcapPseudo::ID = 0;
 
-// inline MachineInstrBuilder BuildMI(MachineBasicBlock &BB,
-//                                    MachineBasicBlock::iterator I,
-//                                    const DebugLoc &DL,
-//                                    const MCInstrDesc &MCID)
-
-// FirstMBB = MF.front()
-// FirstMI = FirstMBB.front()
-// DL = FirstMI.getDebugLoc();
-// auto FirstMBBI = FirstMBB.begin() 
-// BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::XORI), RISCV::X0)
-// .addReg(RISCV::X0)
-// .addImm(-1);
-
-// BuildMI(LoopMBB, DL, TII->get(RISCV::AND))
-//     .addReg(ScratchReg)
-//     .addReg(RISCV::X0)
-//     .addMBB(LoopMBB);
-
-
 bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   unsigned num_instr = 0;
   TII = static_cast<const RISCVInstrInfo *>(MF.getSubtarget().getInstrInfo());
@@ -83,35 +99,26 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   MachineInstr &FirstMI = FirstMBB.front();
   DebugLoc DL = FirstMI.getDebugLoc();
   MachineBasicBlock::iterator FirstMBBI = FirstMBB.begin();
-  errs() << *FirstMBBI;
-  BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
-    .addImm(23);
-  // BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::ECALL));
-    // .addReg(RISCV::X0)
-    // .addImm(-1);
-  
-  auto I = MF.begin();
-  auto E = MF.end();
-  int bb = 0;
-  for(; I != E; ++I){
-    errs() << "BB: " << bb << "\n";
-    errs() << I->front();
-    bb++;   
-    auto BBI = I->begin();
-    auto BBE = I->end();
-    for(; BBI != BBE; ++BBI){
-      ++num_instr;
-    }
-  }
-  errs() << "\n" << glb;
+  // errs() << *FirstMBBI;
+
   if(status == 0){
-    glb++;
-    glb++;
+    std::string source_filename((MF.getFunction()).getParent()->getSourceFileName());
+    initialize_compartment_map(source_filename);
     status = 1;
   }
-  errs() << "\n" << glb;
-  errs() << "\nFinished\n\n";
-  errs() << "\nmcount --- " << MF.getName() << " has " << num_instr << " instructions.\n";
+
+  std::string functionName = MF.getName().str();
+  uint8_t compartment_id = default_compartment;
+  std::map <std::string, uint8_t>::iterator it;
+  it  = compartment_function_map.find(functionName);
+  if(it != compartment_function_map.end()){
+    compartment_id = compartment_function_map.at(functionName);
+  }
+  BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
+    .addImm(compartment_id);
+
+  // errs() << "\nFinished\n\n";
+  // errs() << "\nmcount --- " << MF.getName() << " has " << num_instr << " instructions.\n";
   // errs() << InputFileName;
   // errs() << "\n" << (MF.getFunction()).getParent()->getSourceFileName();
   
