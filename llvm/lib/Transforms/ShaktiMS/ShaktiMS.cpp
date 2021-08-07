@@ -27,6 +27,7 @@ static cl::opt<bool>
     EnableShaktiMS("enable-shakti-ms",
                  cl::desc("Enable-ShaktiMS Pass"), cl::init(false), cl::Hidden);
 
+Type* resolveFunctionPointers(FunctionType *func_type, LLVMContext &Ctx);
 void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs);
 Value* resolveGEPOperator(GEPOperator *GI,DataLayout *D,LLVMContext &Context);
 void staticLoadStore(GEPOperator* operand,Instruction *I,Function *F,std::string str,LLVMContext &Ctx);
@@ -42,12 +43,18 @@ namespace {
 
 		virtual bool runOnModule(Module &M)
 		{
+			errs()<<"********************************************\n";
+			// To skip the Shakti-MS pass if the no functions present in the module
+			bool moduleHasFunctions = false;
 
 		// if(EnableShaktiMS == 1){
 			/* before doing anything check whether pointer decrements are there or not in any function. */
 			std::set<std::string> func_name;
 			for (auto &F : M){
 				if (!F.isDeclaration()) {
+					
+					moduleHasFunctions = true;
+					
 					for (auto &B : F){
 						for (auto &I : B){
 							if(GetElementPtrInst *GI = dyn_cast<GetElementPtrInst>(&I)){
@@ -56,7 +63,7 @@ namespace {
 
 										//errs() << "!!!!!!!!!!!Warning Pointer Decrement in function  : " << F.getName() << "!!!!!!!!!!!!!!!!!!!\n" ;
 										//errs() << *GI->getOperand(0) << "\n" ;
-										errs() << F.getName() ;
+										// errs() << F.getName() ;
 										func_name.insert(F.getName().str());
 
 									}
@@ -77,11 +84,14 @@ namespace {
 				}
 			}
 			if(!func_name.empty()) {
-				errs () << " !!!!!!!!!!! Warning Pointer Decrement in function " ;
+				errs () << " !!!!!!!!!!! Warning Pointer Decrement in function \n" ;
 				std::set<std::string>:: iterator itr;
 				for (itr = func_name.begin(); itr != func_name.end(); ++itr)
 			    {
-			        errs() << *itr << " " ;
+   				    // errs() << " Here \n" ;
+			        errs() << *itr << " : " ;
+       			    // errs() << " Here \n" ;
+
 			    }
 			    errs() << " !!!!!!!!!!!!!!!!!!! \n" ;
 			}
@@ -89,20 +99,25 @@ namespace {
 
 			bool modified=false;
 
+			// Skipping Shakti-MS pass if the no functions present in the module
+			if(moduleHasFunctions == false){
+				return modified	;
+			}
+
 			unsigned long long ro_cook = 0xdeadbeef1337c0d3;
 			unsigned long ro_hash = 0xcd9a7e3c;
 			// First pass creates duplicate definitions of structs with pointers
 			std::vector< StructType * > structs = M.getIdentifiedStructTypes();
 			for(auto &def : structs)
 			{
-				//errs()<<*def<<"\n";
+				errs()<<*def<<"\n";
 				LLVMContext &GCtx = def->getContext();
 				bool flag = false;
 				std::vector<Type *> elems_vec;
 				for(StructType::element_iterator i = def->element_begin(), end = def->element_end(); i!= end; ++i)
 				{
 					Type *ty = dyn_cast<Type>(*i);
-					//errs()<<*ty<<"\n";
+					errs()<<*ty<<"\n";
 					bool isFnArr = false;
 					//if element type is of function pointers then dont make any changes.
 					if(dyn_cast<PointerType>(ty)){
@@ -115,25 +130,43 @@ namespace {
 						if(!isFnArr){
 							elems_vec.push_back(Type::getInt128Ty(GCtx));
 						}else{
+							errs()<<"Here\n";
 							FunctionType *func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(ty)->getElementType());
 							std::vector<Type*> fParamTypes;
-
+							
 							Type *func_ret_type = func_type->getReturnType();
-							Type *fRetType = (func_type->getReturnType()->isPointerTy() && !(dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()) ? Type::getInt128Ty(GCtx) : func_ret_type);
+							errs()<<"Here 3 : "<<*func_ret_type<<"\n";
+							Type *fRetType;
+							if(func_type->getReturnType()->isPointerTy()){
+								if((dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()))
+									fRetType = resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func_ret_type)->getElementType()), GCtx);
+								else
+									fRetType = Type::getInt128Ty(GCtx);
+							}
+							else{
+								fRetType = func_ret_type;
+							}
+							errs()<<"Here 4 : "<<*fRetType<<"\n";
 							for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
 								bool argIsFnArr = 0;
+								errs()<<**k<<"\n";
 								if(dyn_cast<PointerType>(*k)){
 									argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
 								}
-								if((*k)->isPointerTy() && !argIsFnArr){
-									fParamTypes.push_back(Type::getInt128Ty(GCtx));
+								if((*k)->isPointerTy()){
+									if(!argIsFnArr)
+										fParamTypes.push_back(Type::getInt128Ty(GCtx));		
+									else{
+										FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+										Type *newSubType = resolveFunctionPointers(org_func_type, GCtx);
+										fParamTypes.push_back(newSubType);
+									}
 								}
-								else
-									fParamTypes.push_back(*k);
 							}
+							errs()<<"Here\n";
 							FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
-							//errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
-							Type *newType = newFuncType->getPointerTo() ;
+							errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+							Type *newType = resolveFunctionPointers(func_type, GCtx);
 							elems_vec.push_back(newType);
 						}
 						flag = 1;
@@ -449,7 +482,7 @@ namespace {
 			#ifdef debug_spass
 				errs()<<"Second pass done\n";
 			#endif
-			errs()<<"Second pass donsaae\n";
+			
 			// m->replaceAllUsesWith(funcy)
 			dyn_cast<Function>(mallocFunc)->dropAllReferences();
 			dyn_cast<Function>(freeFunc)->dropAllReferences();
@@ -524,7 +557,7 @@ namespace {
 						ptr_to_st_hash = new TruncInst(hash64, Type::getInt32Ty(Ctx),"stack_hash", FPR);
 						stack_cook_ins = true;
 						modified  = true;
-						//errs() << "Stack Cookiner Inserted \n" ;
+						errs() << "Stack Cookiner Inserted \n" ;
 					}
 				}
 				//set up arguments
@@ -538,7 +571,7 @@ namespace {
 				CallInst *burnRandom = CallInst::Create (randomF, "", RI);
 				new StoreInst(burnRandom,st_cook,RI);
 				Builder.CreateCall(hash, args_ref,"stack_cookie_burn");
-				//errs() << "Adding done in function " << F.getName() << "\n" ;
+				// errs() << "Adding done in function " << F.getName() << "\n" ;
 
 				std::vector<Instruction *> storeInsPoint;
 				storeInsPoint.push_back(FPR);
@@ -566,8 +599,12 @@ namespace {
 				LLVMContext &Ctx = func.getContext();
 				if(func.isDeclaration())
 				{
-					//errs()<<"\n*****\nFound declaration:\n"<<func<<"\n*****\n";
-					continue;
+					
+					if(!func.getName().contains("__gm")){
+						errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
+						continue;
+					}
+					// errs()<<"\nChanging Func declaration: "<<func.getName()<<"\n";
 				}
 				//errs()<<"\n*****\nFound definition:\n"<<func<<"\n*****\n";
 
@@ -585,7 +622,13 @@ namespace {
 					isFnArr = dyn_cast<PointerType>(func.getReturnType())->getElementType()->isFunctionTy();
 				}
 
-				Type *fRetType = (func.getReturnType()->isPointerTy() && !(isFnArr) ? Type::getInt128Ty(Ctx) : func.getReturnType());
+				Type *fRetType;
+				if(fnHasPtr){
+					fRetType = (!(isFnArr) ? Type::getInt128Ty(Ctx) : resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func.getReturnType())->getElementType()), Ctx));
+				}
+				else{
+					fRetType = func.getReturnType();
+				}
 				for(FunctionType::param_iterator k = (func.getFunctionType())->param_begin(), endp = (func.getFunctionType())->param_end(); k != endp; ++k)
 				{
 					arg_index++;
@@ -611,6 +654,11 @@ namespace {
 							func.setAttributes(A);
 						}
 					}
+					else if(argIsFnArr){
+						FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+						Type *newSubType = resolveFunctionPointers(org_func_type, Ctx);
+						fParamTypes.push_back(newSubType);
+					}
 					else
 						fParamTypes.push_back(*k);
 					//errs()<<"\npushed "<<*(fParamTypes.back());
@@ -633,7 +681,8 @@ namespace {
 				Function *funcx = to_replace_functions.top();
 				Function *funcy = replace_with_functions.top();
 				int arg_index = argCount.top();
-				//errs()<<"\nto replace: "<<*funcx<<"\n";
+				// errs()<<"\nto replace: "<<*funcx<<"\n";
+				// errs()<<"\nwith      : "<<*funcy<<"\n";
 				to_replace_functions.pop();
 				replace_with_functions.pop();
 				argCount.pop();
@@ -642,14 +691,49 @@ namespace {
 				{
 
 					if(dyn_cast<CallInst>(funcx->user_back()))
-					{
-						//errs()<<"USER:\n"<<*(funcx->user_back())<<"\n";
+					{	
 						CallInst* call = dyn_cast<CallInst>(funcx->user_back());
+						Function* calledFunction = call->getCalledFunction();
+						StringRef to_replace_func_name = funcx->getName();
+						StringRef called_func_name = call->getCalledFunction()->getName();
+
+						// errs()<<"USER:\n"<<*(funcx->user_back())<<"\n";
+						
+						/*
+						CallBase &CB = cast<CallBase>(*funcx->user_back());
+						auto AI = CB.arg_begin();
+						unsigned int ArgNo = 0;
+					    for (; AI != CB.arg_end(); ++AI, ++ArgNo) {
+    						// Args.push_back(*AI);
+    						errs()<<"Argument "<<ArgNo<<"  :  "<<*((*AI)->getType())<<"\n";
+    						if((*AI)->getName().equals(to_replace_func_name)){
+    							errs()<<"FnPtr \n";
+    						}
+    					}
+    					errs()<<"*************************************\n";
+						*/
+						bool isFnPtr = false;
+						if(!called_func_name.equals(to_replace_func_name)){
+							// errs()<<"ARG_DIFFERS : "<<*(funcx->user_back())<<"\n";	
+							isFnPtr = true;
+							funcx->replaceAllUsesWith(funcy);
+							// errs()<<"USER:\n"<<*call<<"\n";
+							continue;
+						}
+
+						std::vector< Value * > new_args;
 						std::vector< Value * > args(call->arg_begin(), call->arg_end());
+						for(auto& it: args){
+							// errs()<<*it<<"\n";
+						}
+
+						
+						
 						// Instruction *call = CS->getInstruction();
 						Instruction *new_call = NULL;
 						const AttributeList &call_attr = call->getAttributes();
 						new_call = CallInst::Create(funcy, args, "", call);
+						// errs()<<*(funcy)<<"\n";
 						CallInst *ci = cast< CallInst >(new_call);
 						ci->setCallingConv(call->getCallingConv());
 						ci->setAttributes(call_attr);
@@ -661,6 +745,9 @@ namespace {
 							call->replaceAllUsesWith(new_call);
 						}
 						new_call->takeName(call);
+
+						// errs()<<"NEW:\n"<<*(new_call)<<"\n";
+						// errs()<<"NEW:\n"<<*(call)<<"\n";
 						call->eraseFromParent();
 					}
 					else if(dyn_cast<StoreInst>(funcx->user_back()))
@@ -694,9 +781,9 @@ namespace {
 					arg_index++;
 				}
 
-				//errs()<<"\n*************************************************\n";
-				//errs()<<funcy->getName()<<"\n-----\n"<<*(funcy->getFunctionType());
-				//errs()<<"\n*************************************************\n";
+				// errs()<<"\n*************************************************\n";
+				// errs()<<funcy->getName()<<"\n-----\n"<<*(funcy->getFunctionType());
+				// errs()<<"\n*************************************************\n";
 				StringRef tmp_name = funcx->getName();
 				funcx->dropAllReferences();
 				funcx->removeFromParent();
@@ -834,9 +921,8 @@ namespace {
 					for(BasicBlock::iterator i = B.begin(), e = B.end(); i != e; ++i)
 					{
 						Instruction *I = dyn_cast<Instruction>(i);
-						//errs()<<*I<<"\n";
 						if (auto *op = dyn_cast<AllocaInst>(I))
-						{
+						{	errs()<<"AllocaInst : "<<*I<<"\n";
 							if(rep_structs.find(dyn_cast<StructType>(op->getAllocatedType())) != rep_structs.end())
 							{
 								op->mutateType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType()))->getPointerTo());
@@ -852,7 +938,7 @@ namespace {
 							//errs()<<"\n-----------\nAlloca:\t"<<*op<<"\n-----------\n";
 						 	else if(op->getAllocatedType()->isPointerTy())
 							{
-								//errs()<<"\n-----------\nptrAlloca:\t"<<*op<<"\n-----------\n";
+								errs()<<"\n-----------\nptrAlloca:\t"<<*op<<"\n-----------\n";
 								bool isFnArr = false;
 								isFnArr = dyn_cast<PointerType>(op->getAllocatedType())->getElementType()->isFunctionTy();
 
@@ -953,6 +1039,7 @@ namespace {
 
 							//do not create a fat pointer if its a normal integer or float or double . 
 							if(!op->getAllocatedType()->isIntegerTy(128) && (op->getAllocatedType()->isFloatTy() || op->getAllocatedType()->isDoubleTy() || op->getAllocatedType()->isIntegerTy())){
+								errs()<<"Not cretaing a fat pointer as it is a normal interger/float/double\n";
 								continue;
 							}
 
@@ -996,7 +1083,7 @@ namespace {
 							op->replaceAllUsesWith(fpr);
 							// except in the ptrtoint instruction that uses the pointer to make a fatpointer
 							trunc->setOperand(0,op);
-
+							errs()<<"End of AllocaInst transformation : "<<*op<<"\n";
 						}
 
 						else if (auto *op = dyn_cast<StoreInst>(I)) {
@@ -1302,7 +1389,7 @@ namespace {
 						}
 						else if (auto *op = dyn_cast<CallInst>(I))
 						{
-							//errs()<<*op<<"\n";
+							// errs()<<"CallInst : "<<*op<<"\n";
 							//errs()<<"\n";
 
 							if(op->getCalledFunction() ==  NULL){
@@ -1332,9 +1419,9 @@ namespace {
 							}
 							if(op->getCalledFunction() != NULL)
 							{
-								if(!(op->getCalledFunction()->isDeclaration())) // skip if definition exists in module
+								if(!(op->getCalledFunction()->isDeclaration()) || (op->getCalledFunction()->getName().contains("__gm"))) // skip if definition exists in module
 								{
-									//errs()<<"\n=************************************************\n";
+									// errs()<<"\n=************************************************\n";
 
 									//if the function 1st paramter type is i128 then remove all attribuetes of the parameter
 									//this is a problem for returning structs.
@@ -1349,8 +1436,8 @@ namespace {
 									continue;
 								}
 
-                                                                //if called function is fgets, then check size < destination buffer 
-                                                                if(op->getCalledFunction()->getName() == "fgets" ){
+                                //if called function is fgets, then check size < destination buffer 
+                                if(op->getCalledFunction()->getName() == "fgets" ){
 									bool isAllow = 1;
 									if(i == B.begin())
 										continue;
@@ -1610,7 +1697,7 @@ namespace {
 									break;
 								}
 							}
-							//errs()<<*op<<"\n";
+							// errs()<<*op<<"\n";
 							for(unsigned int i=0;i<op->getNumOperands()-1;i++)
 							{
 								//this means call parameters match function signature. else break it into required format.
@@ -1620,7 +1707,7 @@ namespace {
 								//if you are using a global pointer in printf scanf or other system calls then collapse that pointer to i8* or to the required pointer type before calling.
 								if(op->getCalledFunction()!=NULL ) { //&& (!op->getCalledFunction()->isIntrinsic()) //&& op->getCalledFunction()->isDeclaration() -- not required as it will readh here only if its a declaration
 										if(op->getOperand(i)->getType() == Type::getInt128Ty(Ctx)){
-											//errs() <<  "before : " << *op << "\n" ;
+											errs() <<  "before : " << *op << "\n" ;
 											//truncte to i8* and then pass to the function
 
 											//validate the pointer 
@@ -1645,7 +1732,7 @@ namespace {
 											//type cast to i8* 
 											Type *ptype = Type::getInt8PtrTy(Ctx);
 											if(op->getCalledFunction() != NULL)
-											{
+											{	errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
 												if(!op->getCalledFunction()->isVarArg())
 												{
 													ptype = op->getCalledFunction()->getFunctionType()->params()[i];
@@ -1653,6 +1740,7 @@ namespace {
 												else if(i < op->getCalledFunction()->getFunctionType()->params().size())
 												{
 													ptype = op->getCalledFunction()->getFunctionType()->params()[i];
+													errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
 												}
 											}
 
@@ -1665,7 +1753,7 @@ namespace {
 											op->setOperand(i,ptr);
 											op->getOperand(i)->mutateType(ptype);
 											continue;
-											//errs() <<  "after : " << *op << "\n" ;
+											errs() <<  "after : " << *op << "\n" ;
 										}
 								}
 								//if(op->getCalledFunction()->getName() == "fprintf")
@@ -1692,7 +1780,7 @@ namespace {
 								Builder.SetInsertPoint(I);
 								Builder.CreateCall(val, args_ref,"");
 
-								//errs()<<*op<<"\n";
+								errs()<<*op<<"\n";
 								Type *ptype = Type::getInt8PtrTy(Ctx);;
 								if(op->getCalledFunction() != NULL)
 								{
@@ -1721,14 +1809,15 @@ namespace {
 
 								op->setOperand(i,ptr);
 								op->getOperand(i)->mutateType(ptype);
-								//errs()<<*op<<"\n";
-								//errs()<<*(op->getOperand(i)->getType())<<"\n";
+								// errs()<<*op<<"\n";
+								// errs()<<*(op->getOperand(i)->getType())<<"\n";
 							}
 							if(op->getFunctionType()->getReturnType() == Type::getInt128Ty(Ctx))
 							{
 								op->mutateType(Type::getInt128Ty(Ctx));
 							}
-							//errs()<<"\n=************************************************\n";//*/
+							// errs()<<*op<<"\n";
+							// errs()<<"\n=************************************************\n";//*/
 						}
 						else if (auto *op = dyn_cast<ICmpInst>(I))
 						{
@@ -1772,7 +1861,7 @@ namespace {
 							}
 						}
 						else if (auto *op = dyn_cast<PtrToIntInst>(I))
-						{
+						{	errs()<<"PtrToIntInst : "<<*op<<"\n";
 							if(op->getOperand(0)->getType() == Type::getInt128Ty(Ctx))
 							{
 								Value* mask2 = llvm::ConstantInt::get(Type::getInt128Ty(Ctx),0x000000000000000000000000ffffffff);
@@ -1788,14 +1877,21 @@ namespace {
 							Value *op1 = op->getOperand(0);
 							Value *op2 = op->getOperand(1);
 
+							errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+
+							if((op1->getType()==op2->getType()) && (op2->getType() == Type::getInt128Ty(Ctx))){
+								op->mutateType(Type::getInt128Ty(Ctx));
+							}
+
 							if(op1->getType()!=op2->getType()){
 								if(op2->getType() == Type::getInt128Ty(Ctx)){
 									//change type 0 to i128 and phi node type to i128 also.
+									// errs()<<"Changing type 0\n";
 									craftFatPointer(op,0,craftFunc,D,Ctx,ptr_to_st_cook,ptr_to_st_hash,rodata_cookie,ro_hash);
 								}
 
 							}
-
+							errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
 						}
 						//TODO: this is a temporary fix for functions that return pointers to global variables
 						else if (auto *op = dyn_cast<ReturnInst>(I))
@@ -1836,6 +1932,51 @@ namespace {
 	};
 }
 
+Type* resolveFunctionPointers(FunctionType *func_type, LLVMContext &Ctx){
+	bool fnHasPtr = false;
+	bool isFnArr = 0;
+	std::vector<Type*> fParamTypes;
+
+	Type *func_ret_type = func_type->getReturnType();
+	Type *fRetType;
+
+	fnHasPtr = (func_type->getReturnType()->isPointerTy() ? true : false);
+
+	if(dyn_cast<PointerType>(func_type->getReturnType())){
+		isFnArr = dyn_cast<PointerType>(func_type->getReturnType())->getElementType()->isFunctionTy();
+	}
+
+	if(isFnArr){
+		fRetType = resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func_ret_type)->getElementType()), Ctx);
+	}
+	else{
+		fRetType = (func_type->getReturnType()->isPointerTy() && !(dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()) ? Type::getInt128Ty(Ctx) : func_ret_type);
+	}	
+
+	for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
+		bool argIsFnArr = 0;
+		if(dyn_cast<PointerType>(*k)){
+			argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
+		}
+		if((*k)->isPointerTy() && !argIsFnArr){
+			fParamTypes.push_back(Type::getInt128Ty(Ctx));
+		}
+		else if(argIsFnArr){
+			// Type *org_ty = dyn_cast<Type>(*k);
+			FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+			Type *newSubType = resolveFunctionPointers(org_func_type, Ctx); 
+			fParamTypes.push_back(newSubType);
+		}
+		else{
+			fParamTypes.push_back(*k);
+		}
+	}
+	FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
+	//errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+	Type *newType = newFuncType->getPointerTo();
+	return newType;
+}
+
 bool isLocal(Instruction *ins){
 
 	//check if the variable is local or not 
@@ -1870,7 +2011,7 @@ void craftFatPointer(Instruction *ins, unsigned int i, FunctionCallee craftFunc,
 	}
 
 	PtrToIntInst *trunc = new PtrToIntInst(op->getOperand(i), Type::getInt32Ty(Ctx),"pti1_",insertPoint);
-	//errs() << *op->getOperand(0) << "\n" ;
+	errs() << "Inside carftFatPointer() : "<<*op->getOperand(0) << "\n" ;
 	std::vector<Value *> args;
 	args.push_back(trunc);//ptr
 

@@ -31,4 +31,34 @@
     https://github.com/google/autofdo/issues/87
     https://github.com/google/autofdo/pull/90
 
-9). 
+9). Skipping moduleHasFunctions variable to skip the Shakti-MS pass if the module does not have any functions at all
+    eg: .C file only has data arrays or variables defined : gmp/mpn/fib_table.c
+
+10). USER:
+  <badref> = call addrspace(0) i64 @__gmpn_gcd_subdiv_step(i64* %421, i64* %422, i64 %423, i64 0, void (i8*, i64*, i64, i64*, i64, i32)* @gcd_hook, i8* %424, i64* %425)
+
+  Function pointer as argument inside function, the function type need to be changed.
+
+11). --disable-alloca => solves alloca i8* & i128 => PHI node :: aorsmul.c
+    PHI node domination error, relating to call to tmp_reentrant_alloc()
+    For now solving it by enabling --disable-alloca option(not sure of its consequences)
+
+12). PHI node where both operands are i128 but result operand is still pointer.
+    Solution -> Check for that condition in 5th pass and mutateType to i128, in a similar way how it was done in the craftFatPointer()
+
+
+
+
+For GNU-MP
+mpz & mpq => Riscv
+
+mpf commented out -> random2.c, inp_str.c, out_str.c
+mpn commented out -> random.c, random2.c
+
+--disable-alloca => solves alloca i8* & i128 => PHI node :: aorsmul.c
+
+
+Not required files:
+1). mpz/init2.c
+2). mpz/inp2_raw.c
+3). 
