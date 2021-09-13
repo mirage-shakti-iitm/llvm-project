@@ -18,7 +18,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#define debug_spass
+// #define debug_spass
 // #define debug_spass_dmodule
 
 using namespace llvm;
@@ -130,12 +130,12 @@ namespace {
 						if(!isFnArr){
 							elems_vec.push_back(Type::getInt128Ty(GCtx));
 						}else{
-							errs()<<"Here\n";
+							// errs()<<"Here\n";
 							FunctionType *func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(ty)->getElementType());
 							std::vector<Type*> fParamTypes;
 							
 							Type *func_ret_type = func_type->getReturnType();
-							errs()<<"Here 3 : "<<*func_ret_type<<"\n";
+							// errs()<<"Here 3 : "<<*func_ret_type<<"\n";
 							Type *fRetType;
 							if(func_type->getReturnType()->isPointerTy()){
 								if((dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()))
@@ -146,7 +146,7 @@ namespace {
 							else{
 								fRetType = func_ret_type;
 							}
-							errs()<<"Here 4 : "<<*fRetType<<"\n";
+							// errs()<<"Here 4 : "<<*fRetType<<"\n";
 							for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
 								bool argIsFnArr = 0;
 								errs()<<**k<<"\n";
@@ -163,9 +163,9 @@ namespace {
 									}
 								}
 							}
-							errs()<<"Here\n";
+							// errs()<<"Here\n";
 							FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
-							errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+							// errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
 							Type *newType = resolveFunctionPointers(func_type, GCtx);
 							elems_vec.push_back(newType);
 						}
@@ -186,7 +186,7 @@ namespace {
 					ArrayRef<Type *> elems(elems_vec);
 					StructType *frm = dyn_cast<StructType>(def);
 					StructType *to = StructType::create(elems,frm->getStructName(),frm->isPacked());
-					//errs()<<"------------------\nINSERTING "<<*frm<<"\nTO "<<*to<<"\n------------------\n";
+					errs()<<"------------------\nINSERTING "<<*frm<<"\nTO "<<*to<<"\n------------------\n";
 					rep_structs.insert(std::make_pair(frm, to));
 				}
 			}
@@ -557,7 +557,7 @@ namespace {
 						ptr_to_st_hash = new TruncInst(hash64, Type::getInt32Ty(Ctx),"stack_hash", FPR);
 						stack_cook_ins = true;
 						modified  = true;
-						errs() << "Stack Cookiner Inserted \n" ;
+						// errs() << "Stack Cookie Inserted \n" ;
 					}
 				}
 				//set up arguments
@@ -601,7 +601,7 @@ namespace {
 				{
 					
 					if(!func.getName().contains("__gm")){
-						errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
+						// errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
 						continue;
 					}
 					// errs()<<"\nChanging Func declaration: "<<func.getName()<<"\n";
@@ -788,6 +788,7 @@ namespace {
 				funcx->dropAllReferences();
 				funcx->removeFromParent();
 				funcy->setName(tmp_name);
+				// errs()<<*funcy<<"\n";
 			}
 			#ifdef debug_spass
 				errs()<<"Fourth pass done\n";
@@ -922,7 +923,8 @@ namespace {
 					{
 						Instruction *I = dyn_cast<Instruction>(i);
 						if (auto *op = dyn_cast<AllocaInst>(I))
-						{	errs()<<"AllocaInst : "<<*I<<"\n";
+						{	
+							// errs()<<"AllocaInst : "<<*I<<"\n";
 							if(rep_structs.find(dyn_cast<StructType>(op->getAllocatedType())) != rep_structs.end())
 							{
 								op->mutateType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType()))->getPointerTo());
@@ -938,7 +940,7 @@ namespace {
 							//errs()<<"\n-----------\nAlloca:\t"<<*op<<"\n-----------\n";
 						 	else if(op->getAllocatedType()->isPointerTy())
 							{
-								errs()<<"\n-----------\nptrAlloca:\t"<<*op<<"\n-----------\n";
+								// errs()<<"\n-----------\nptrAlloca:\t"<<*op<<"\n-----------\n";
 								bool isFnArr = false;
 								isFnArr = dyn_cast<PointerType>(op->getAllocatedType())->getElementType()->isFunctionTy();
 
@@ -1039,7 +1041,7 @@ namespace {
 
 							//do not create a fat pointer if its a normal integer or float or double . 
 							if(!op->getAllocatedType()->isIntegerTy(128) && (op->getAllocatedType()->isFloatTy() || op->getAllocatedType()->isDoubleTy() || op->getAllocatedType()->isIntegerTy())){
-								errs()<<"Not cretaing a fat pointer as it is a normal interger/float/double\n";
+								// errs()<<"Not cretaing a fat pointer as it is a normal interger/float/double\n";
 								continue;
 							}
 
@@ -1083,7 +1085,7 @@ namespace {
 							op->replaceAllUsesWith(fpr);
 							// except in the ptrtoint instruction that uses the pointer to make a fatpointer
 							trunc->setOperand(0,op);
-							errs()<<"End of AllocaInst transformation : "<<*op<<"\n";
+							// errs()<<"End of AllocaInst transformation : "<<*op<<"\n";
 						}
 
 						else if (auto *op = dyn_cast<StoreInst>(I)) {
@@ -1861,7 +1863,8 @@ namespace {
 							}
 						}
 						else if (auto *op = dyn_cast<PtrToIntInst>(I))
-						{	errs()<<"PtrToIntInst : "<<*op<<"\n";
+						{	
+							// errs()<<"PtrToIntInst : "<<*op<<"\n";
 							if(op->getOperand(0)->getType() == Type::getInt128Ty(Ctx))
 							{
 								Value* mask2 = llvm::ConstantInt::get(Type::getInt128Ty(Ctx),0x000000000000000000000000ffffffff);
@@ -1877,7 +1880,7 @@ namespace {
 							Value *op1 = op->getOperand(0);
 							Value *op2 = op->getOperand(1);
 
-							errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							// errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
 
 							if((op1->getType()==op2->getType()) && (op2->getType() == Type::getInt128Ty(Ctx))){
 								op->mutateType(Type::getInt128Ty(Ctx));
@@ -1891,7 +1894,7 @@ namespace {
 								}
 
 							}
-							errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							// errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
 						}
 						//TODO: this is a temporary fix for functions that return pointers to global variables
 						else if (auto *op = dyn_cast<ReturnInst>(I))
@@ -2011,7 +2014,7 @@ void craftFatPointer(Instruction *ins, unsigned int i, FunctionCallee craftFunc,
 	}
 
 	PtrToIntInst *trunc = new PtrToIntInst(op->getOperand(i), Type::getInt32Ty(Ctx),"pti1_",insertPoint);
-	errs() << "Inside carftFatPointer() : "<<*op->getOperand(0) << "\n" ;
+	// errs() << "Inside carftFatPointer() : "<<*op->getOperand(0) << "\n" ;
 	std::vector<Value *> args;
 	args.push_back(trunc);//ptr
 

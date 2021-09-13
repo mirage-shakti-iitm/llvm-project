@@ -1,0 +1,101 @@
+commented in shakti.cpp as mirage_problem_<count>
+solution annotated as solution_problem_1
+Problem 1:
+	Function pointer elements inside struct are changed such that, the pointers inside those function pointers are changed to fat pointers if they are normal 
+	pointers. But here 
+	they are not doing anything w.r.t function pointer inside function pointer. For now it is not breaking, but this is logically wrong.
+	eg: struct sqlite3_api_routines
+
+	Solution: (coded)
+		Define a new function which is invoked recursively for all the function pointer within a function pointer, changing all the normal pointer elements to 
+		fat pointer. This should occur for every nested function pointer.
+
+
+Problem 2:
+	If return type of function is a normal pointer, then convert it to fat pointer. If it is a function pointer then you retain it.
+	But here the function pointer may have pointer within it as arguments which should be changed to fat pointers. 
+
+	Solution: (coded)
+		Same as solution 1.
+
+	But see whether any function returns a function pointer. If no function pointer is returned, then you can try to avoid this case for now.
+
+Problem 3:
+	Function pointer arguments of a function are retained just like that. The pointers within the function pointer need to be changed to fat pointers.
+
+	Solution: (coded)
+		Same as solution 1
+
+Problem 4:
+	Use cases of Call Instruction w.r.t. a function need not be just be the same as the direct function that is being invoked. It could have been passed as a 
+	function pointer as part of the Call Instruction. 
+
+	Solution:
+		We should check whether the call instruction's called fucntion is same as funcx or funcx is part of the function's argument i.e. fucntion pointer. Based 
+		on this condition, we should have separate logic to create a corresponding new call instruction.
+
+
+
+***********************************************************************************************
+Sizeof problem
+
+Hello KC
+Regarding sizeof problem in Shakti-MS.
+Actual problem: In LLVM IR, sizeof(...) is replaced by the actual constant(the variable's/type's size). So no way change the sizeof(struct s1)
+where struct s1 contains a pointer member in it within the LLVM pass.
+
+So I was thinking of another solution similar to the manual one, where we change the sizeof(struct s1) to the actual size with the fat pointer 
+member in it. 
+We can have a minor LLVM pass that doesnot do anything w.r.t source code but creates a table of format ->
+<structure name : original_size_without_fat_pointer : new_size>. 
+Then I will write a separate parsing program that works on the actual C source code and iterates over all occurences of sizeof and makes use of the 
+table generated to replace sizeof(struct s1) to the actual constant itself. 
+Then the new C source code can be passed to the Shakti-MS LLVM pass. At this stage we would have fixed all the sizeof. 
+
+***********************************************************************************************
+
+To ask Ambika/Sourav:
+
+Doubt 1:
+	What does the code fun.hasStructRetAttr do? Does it interfere in anyway with problem 1.
+
+Doubt 2:
+	What should we do w.r.t Store type of instructions w.r.t replacing the function call uses.
+
+Doubt 3:
+	Should we add any other conditions w.r.t replacing the funcction use cases, other than CallInst and StoreInst.
+
+***********************************************************************************************
+
+To inspect:
+
+1). From Pass 5 onwards we should inspect. Moreover all the above 4 problems occur whenever there is a distinguishment between Function Pointer and normal pointer.
+So where all isFnArr occurs, there is a potential problem.
+
+
+
+Task 1:
+1). Add the resolveFunctionPointer to GLob pointer case(1st/2nd pass), AllocaInst(5th pass), LoadInst(5th pass)
+2). Add the rep_structs replacement logic for all the other 
+
+
+
+
+
+
+
+
+
+
+
+Helpful code snippets:
+
+if(calledFunction !=NULL){
+	if(calledFunction->getName().equals("sqlite3MallocSize")){
+		errs()<<"\n\nsqlite3MallocSize called in @\t"<<"\n"; //F.getName()
+		errs()<<"Instruction\t:::::::\t"<<*op<<"\n";
+		for(unsigned int i=0;i<op->getNumOperands()-1;i++){
+        	errs()<<*(op->getOperand(i)->getType())<<" : "<<*(op->getFunctionType()->getParamType(i))<<"\n";
+		}
+    }
+}
