@@ -20,6 +20,9 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 // #define debug_spass
 // #define debug_spass_dmodule
+// #define debug_sms_pass_5
+// #define debug_craft_fat_pointer
+// #define debug_is_local
 
 using namespace llvm;
 
@@ -38,6 +41,10 @@ namespace {
 	{
 		static char ID;
 		shaktiPass() : ModulePass(ID) {}
+
+		if(!EnableShaktiMS){
+			return 0;
+		}
 
 		std::map <StructType*, StructType*> rep_structs;
 
@@ -922,6 +929,11 @@ namespace {
 					for(BasicBlock::iterator i = B.begin(), e = B.end(); i != e; ++i)
 					{
 						Instruction *I = dyn_cast<Instruction>(i);
+
+						#ifdef debug_sms_pass_5
+							errs()<<*I<<"\n";
+						#endif
+
 						if (auto *op = dyn_cast<AllocaInst>(I))
 						{	
 							// errs()<<"AllocaInst : "<<*I<<"\n";
@@ -1880,7 +1892,9 @@ namespace {
 							Value *op1 = op->getOperand(0);
 							Value *op2 = op->getOperand(1);
 
-							// errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							#ifdef debug_sms_pass_5
+								errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							#endif
 
 							if((op1->getType()==op2->getType()) && (op2->getType() == Type::getInt128Ty(Ctx))){
 								op->mutateType(Type::getInt128Ty(Ctx));
@@ -1889,12 +1903,16 @@ namespace {
 							if(op1->getType()!=op2->getType()){
 								if(op2->getType() == Type::getInt128Ty(Ctx)){
 									//change type 0 to i128 and phi node type to i128 also.
-									// errs()<<"Changing type 0\n";
+									#ifdef debug_sms_pass_5
+										errs()<<"Changing type 0\n";
+									#endif
 									craftFatPointer(op,0,craftFunc,D,Ctx,ptr_to_st_cook,ptr_to_st_hash,rodata_cookie,ro_hash);
 								}
 
 							}
-							// errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							#ifdef debug_sms_pass_5
+								errs()<<"PHINode : "<<*op<<" : "<<*(op->getType())<<" : "<<*(op1->getType())<<" : "<<*(op2->getType())<<"\n";
+							#endif
 						}
 						//TODO: this is a temporary fix for functions that return pointers to global variables
 						else if (auto *op = dyn_cast<ReturnInst>(I))
@@ -1984,8 +2002,12 @@ bool isLocal(Instruction *ins){
 
 	//check if the variable is local or not 
 	bool flag = false;
-	while(dyn_cast<Instruction>(ins)){
 
+
+	while(dyn_cast<Instruction>(ins)){
+		#ifdef debug_is_local
+			errs() << "Inside isLocal() : "<<*ins<< "\n";
+		#endif
 		if(dyn_cast<AllocaInst>(ins))
 			break;
 
@@ -2014,12 +2036,19 @@ void craftFatPointer(Instruction *ins, unsigned int i, FunctionCallee craftFunc,
 	}
 
 	PtrToIntInst *trunc = new PtrToIntInst(op->getOperand(i), Type::getInt32Ty(Ctx),"pti1_",insertPoint);
-	// errs() << "Inside carftFatPointer() : "<<*op->getOperand(0) << "\n" ;
+	
+	#ifdef debug_craft_fat_pointer
+		errs() << "Inside carftFatPointer() : "<<*op->getOperand(i) << "\n";
+	#endif
+
 	std::vector<Value *> args;
 	args.push_back(trunc);//ptr
 
 	//check if the variable is local or not( local = 1 , global = 0 )
 	bool isVarLocal = isLocal(dyn_cast<Instruction>( op->getOperand(i)));
+	#ifdef debug_craft_fat_pointer
+		errs() << "Inside carftFatPointer() isVarLocal: "<<isVarLocal<< "\n";
+	#endif
 	if(isVarLocal){
 		args.push_back(ptr_to_st_cook);
 	}else{
@@ -2031,6 +2060,9 @@ void craftFatPointer(Instruction *ins, unsigned int i, FunctionCallee craftFunc,
 	if(dyn_cast<GEPOperator>(op->getOperand(i))){
 		GEPOperator *gep = dyn_cast<GEPOperator>(op->getOperand(i));
 		size = resolveGEPOperator(gep,D,Ctx);
+		#ifdef debug_craft_fat_pointer
+			errs() << "Inside carftFatPointer() size : "<<size<< "\n";
+		#endif
 	}else{
 		if( dyn_cast<PointerType>(op->getOperand(i)->getType())->getElementType() != Type::getInt16Ty(Ctx) )
 			size =  llvm::ConstantInt::get(Type::getInt32Ty(Ctx),(D->getTypeAllocSize(dyn_cast<PointerType>(op->getOperand(i)->getType())->getElementType() ))); // need to check
@@ -2265,6 +2297,8 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 
 char shaktiPass::ID = 0;
 static RegisterPass<shaktiPass> X("sms", "Shakti-T transforms");
+
+
 
 static RegisterStandardPasses Y(
     PassManagerBuilder::EP_EnabledOnOptLevel0,
