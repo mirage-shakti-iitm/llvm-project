@@ -55,6 +55,7 @@
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 #include "llvm/Transforms/Vectorize.h"
+#include "llvm/Transforms/ShaktiMS.h"
 #include <cstdlib>
 
 namespace {
@@ -245,6 +246,8 @@ namespace {
             llvm::AAMDNodes()); // for -print-alias-sets
       (void) llvm::AreStatisticsEnabled();
       (void) llvm::sys::RunningOnValgrind();
+
+      (void) llvm::createShaktiMSPass();
     }
   } ForcePassLinking; // Force link by creating a global definition.
 }

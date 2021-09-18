@@ -73,6 +73,9 @@ struct GCOVOptions {
   std::string Exclude;
 };
 
+// ShaktiMSPass
+ModulePass *createShaktiMSPass();
+
 ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
                                    GCOVOptions::getDefault());
 

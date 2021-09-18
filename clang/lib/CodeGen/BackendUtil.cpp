@@ -81,6 +81,8 @@
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
 #include "llvm/Transforms/Utils/UniqueInternalLinkageNames.h"
 #include <memory>
+// #include "llvm/Transforms/ShaktiMS.h"
+
 using namespace clang;
 using namespace llvm;
 
@@ -870,6 +872,12 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   if (TM)
     TheModule->setDataLayout(TM->createDataLayout());
 
+  legacy::PassManager SMSModulePass;
+  SMSModulePass.add(
+      createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
+  SMSModulePass.add(createShaktiMSPass());
+  
+
   legacy::PassManager PerModulePasses;
   PerModulePasses.add(
       createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
@@ -942,6 +950,12 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
 
   // Run passes. For now we do all passes at once, but eventually we
   // would like to have the option of streaming code generation.
+
+  {
+    PrettyStackTraceString CrashInfo("SMS pass");
+    llvm::TimeTraceScope TimeScope("SMSModulePass");
+    SMSModulePass.run(*TheModule);
+  }
 
   {
     PrettyStackTraceString CrashInfo("Per-function optimization");

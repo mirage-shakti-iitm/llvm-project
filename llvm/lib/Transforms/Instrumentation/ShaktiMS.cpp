@@ -20,7 +20,7 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/InitializePasses.h"
 
-// #define debug_spass
+#define debug_spass
 // #define debug_spass_dmodule
 // #define debug_sms_pass_5
 // #define debug_craft_fat_pointer
@@ -49,7 +49,7 @@ namespace {
 		virtual bool runOnModule(Module &M)
 		{	
 
-			if(!EnableShaktiMS){
+			if(EnableShaktiMS == false){
 				return 0;
 			}
 
@@ -2299,14 +2299,14 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 
 
 char shaktiPass::ID = 0;
-static RegisterPass<shaktiPass> X("sms", "Shakti-T transforms");
+// static RegisterPass<shaktiPass> X("sms", "Shakti-T transforms");
 
 
 
-static RegisterStandardPasses Y(
-    PassManagerBuilder::EP_EnabledOnOptLevel0,
-    [](const PassManagerBuilder &Builder,
-       legacy::PassManagerBase &PM) { PM.add(new shaktiPass()); });
+// static RegisterStandardPasses Y(
+//     PassManagerBuilder::EP_EnabledOnOptLevel0,
+//     [](const PassManagerBuilder &Builder,
+//        legacy::PassManagerBase &PM) { PM.add(new shaktiPass()); });
 
 INITIALIZE_PASS_BEGIN(shaktiPass,
                       "sms",
