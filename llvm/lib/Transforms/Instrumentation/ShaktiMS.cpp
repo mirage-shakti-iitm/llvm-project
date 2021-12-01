@@ -22,6 +22,7 @@
 
 #define debug_spass
 // #define debug_spass_dmodule
+// #define debug_sms_pass_2
 // #define debug_sms_pass_5
 // #define debug_craft_fat_pointer
 // #define debug_is_local
@@ -127,7 +128,7 @@ namespace {
 				for(StructType::element_iterator i = def->element_begin(), end = def->element_end(); i!= end; ++i)
 				{
 					Type *ty = dyn_cast<Type>(*i);
-					errs()<<*ty<<"\n";
+					// errs()<<*ty<<"\n";
 					bool isFnArr = false;
 					//if element type is of function pointers then dont make any changes.
 					if(dyn_cast<PointerType>(ty)){
@@ -196,7 +197,13 @@ namespace {
 					ArrayRef<Type *> elems(elems_vec);
 					StructType *frm = dyn_cast<StructType>(def);
 					StructType *to = StructType::create(elems,frm->getStructName(),frm->isPacked());
-					errs()<<"------------------\nINSERTING "<<*frm<<"\nTO "<<*to<<"\n------------------\n";
+
+					DataLayout *D = new DataLayout(&M);
+					const StructLayout *SL_to = D->getStructLayout(to);
+					const StructLayout *SL_from = D->getStructLayout(frm);
+					unsigned long long to_sz = SL_to->getSizeInBytes();
+					unsigned long long from_sz = SL_from->getSizeInBytes();
+					errs()<<"------------------\nINSERTING "<<*frm<<" : size = "<<from_sz<<"\nTO "<<*to<<" : size = "<<to_sz<<"\n------------------\n";
 					rep_structs.insert(std::make_pair(frm, to));
 				}
 			}
@@ -380,12 +387,19 @@ namespace {
 						// If instruction is of type call
 						if (auto *op = dyn_cast<CallInst>(&I))
 						{
-							
+							#ifdef debug_sms_pass_2
+								errs()<<op->getCalledOperand()->getName()<<" : "<<op->getCalledOperand()->hasName()<<" : "<<F.getName()<<"\n";
+								if(!(op->getCalledOperand()->hasName())){
+									errs() << I<<"\n";
+									errs() << *op->getCalledOperand()->getType()<<"\n";
+								}
+							#endif
+
 							// If call invokes malloc
 							if((op->getCalledOperand() == mallocFunc) || (op->getCalledOperand() == reallocFunc))
 							{
 								BitCastInst *nextbc;
-								//errs()<<"*******\n"<<*op<<"\n"<<*op->getNextNode()<<"\n-------\n";
+								// errs()<<"*******\n"<<*op<<"\n"<<*op->getNextNode()<<"\n-------\n";
 								if((nextbc = dyn_cast<BitCastInst>(op->getNextNode())))
 								{
 									if(op == nextbc->getOperand(0))
@@ -437,6 +451,7 @@ namespace {
 								//op->print(llvm::errs(), NULL);
 								//errs()<<"\nwith:\n";
 								// Replace malloc with safemalloc in call
+
 								if(op->getCalledOperand() == mallocFunc){
 									// errs() << "\n" << *op;
 									
@@ -471,15 +486,15 @@ namespace {
 							}
 							else if((op->getCalledOperand()) == (freeFunc))
 							{
-								//errs()<<"\n----------------\nReplacing:\n";
-								//op->print(llvm::errs(), NULL);
-								//errs()<<"\nwith:\n";
+								// errs()<<"\n----------------\nReplacing:\n";
+								// op->print(llvm::errs(), NULL);
+								// errs()<<"\nwith:\n";
 								// Replace free with safefree in call
 								// errs() << "\n" << *op;
 								
 								op->setCalledFunction (safefreeFunc);
-								//op->print(llvm::errs(), NULL);
-								//errs()<<"\n----------------\n";
+								// op->print(llvm::errs(), NULL);
+								// errs()<<"\n----------------\n";
 								// errs() << "\n" << *op << "\n";
 								// Set flag if modified
 								modified=true;
@@ -567,7 +582,7 @@ namespace {
 						ptr_to_st_hash = new TruncInst(hash64, Type::getInt32Ty(Ctx),"stack_hash", FPR);
 						stack_cook_ins = true;
 						modified  = true;
-						// errs() << "Stack Cookie Inserted \n" ;
+						errs() << "Stack Cookie Inserted \n" ;
 					}
 				}
 				//set up arguments
@@ -611,7 +626,7 @@ namespace {
 				{
 					
 					if(!func.getName().contains("__gm")){
-						// errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
+						errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
 						continue;
 					}
 					// errs()<<"\nChanging Func declaration: "<<func.getName()<<"\n";
@@ -1438,7 +1453,8 @@ namespace {
 							{
 								if(!(op->getCalledFunction()->isDeclaration()) || (op->getCalledFunction()->getName().contains("__gm"))) // skip if definition exists in module
 								{
-									// errs()<<"\n=************************************************\n";
+									errs()<<"\n=************************************************\n";
+									errs()<<*op<<"\n";
 
 									//if the function 1st paramter type is i128 then remove all attribuetes of the parameter
 									//this is a problem for returning structs.
