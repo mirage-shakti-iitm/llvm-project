@@ -1,0 +1,347 @@
+//add those initializers of global variables here
+				if(!glob_var.empty() && F.getName() == "main"){
+					while (!glob_var.empty()){
+						errs() << *glob_var.begin()->first << " => " << *glob_var.begin()->second << '\n';
+						Value *val;
+						GlobalVariable *glob_ptr = dyn_cast<GlobalVariable>(glob_var.begin()->first);
+						PtrToIntInst *trunc;
+						std::vector<Value *> args;
+						if(dyn_cast<GEPOperator>(glob_var.begin()->second)){
+							val = glob_var.begin()->second ;
+							trunc = new PtrToIntInst(val, Type::getInt32Ty(Ctx),"pti1_",insertPoint);
+						}else{
+							val = dyn_cast<Value>(glob_var.begin()->second);
+							trunc = new PtrToIntInst(val, Type::getInt32Ty(Ctx),"pti1_",insertPoint);
+						}
+
+						if(!(val->getType() == Type::getInt128Ty(Ctx))){
+							//create a fat pointer out of it and then store it in gloval_var.begin()->first.
+							args.push_back(trunc);//ptr
+							PtrToIntInst *ptr32 = new PtrToIntInst(rodata_cookie, Type::getInt32Ty(Ctx),"ptr32_1_",insertPoint);
+							args.push_back(ptr32);//base
+
+							Value *size;
+							if(dyn_cast<GEPOperator>(val)){
+
+								GEPOperator *gep = dyn_cast<GEPOperator>(val);
+								size = resolveGEPOperator(gep,D,Ctx);
+							}else{
+								size = llvm::ConstantInt::get(Type::getInt32Ty(Ctx),(D->getTypeAllocSize(val->getType()))); // need to check
+							}
+
+							BinaryOperator *bound = BinaryOperator::Create( Instruction::Add, trunc , size , "absolute_bnd", insertPoint);
+							args.push_back(bound);
+							args.push_back(ConstantInt::get(Type::getInt32Ty(Ctx),ro_hash));//hash
+							ArrayRef<Value *> args_ref(args);
+
+							IRBuilder<> Builder(insertPoint);
+							Builder.SetInsertPoint(insertPoint);
+							Value *fpr = Builder.CreateCall(craftFunc, args_ref,val->getName()+"_fprz");
+							new StoreInst (fpr, glob_ptr, insertPoint);
+						}
+						else{
+							new StoreInst (val, glob_ptr, insertPoint);
+						}
+						glob_var.erase(glob_var.begin());
+					}
+				}
+
+/***************************************************************************************************************************************************************************/
+						if (auto *op = dyn_cast<AllocaInst>(I))
+						{	
+							// errs()<<"AllocaInst : "<<*I<<"\n";
+							if(rep_structs.find(dyn_cast<StructType>(op->getAllocatedType())) != rep_structs.end())
+							{
+								op->mutateType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType()))->getPointerTo());
+								op->setAllocatedType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType())));
+								// errs()<<*op->getAllocatedType()<<"\n";
+							}
+							else if(op->getAllocatedType()->isArrayTy())
+							{
+								ArrayType *t = dyn_cast<ArrayType>(op->getAllocatedType());
+								ArrayType *rec = t;
+								ArrayType *rec_old = t;
+								int depth=1;
+								std::stack <int> sizes;
+								sizes.push(t->getArrayNumElements());
+								while((rec = dyn_cast<ArrayType>(rec->getElementType())))
+								{
+									//errs()<<depth<<": "<<*rec<<"\n";
+									sizes.push(rec->getArrayNumElements());
+									rec_old = rec;
+									depth++;
+								}
+
+								Type *baseTy = rec_old->getElementType();
+
+								Type *gelType = Type::getInt128Ty(Ctx);
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									gelType = ArrayType::get(gelType,sz);
+									depth--;
+								}
+
+								bool isFnArr = 0;
+								if(dyn_cast<PointerType>(baseTy))
+								{
+									//errs()<<"Found array: "<<*op<<", baseTy = "<<dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy()<<"\n";
+									isFnArr = dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy();
+								}
+								if(baseTy->isPointerTy() && !(isFnArr))	//Only do if array is ptr array, and not a fn ptr array
+								{
+									//errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
+									//errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
+									op->setAllocatedType(gelType);
+									op->mutateType(gelType->getPointerTo());
+
+								}
+								//errs()<<*op<<"\n";
+							}
+							if (op->getName() == "stack_cookie")
+							{
+								//ptr_to_st_cook = dyn_cast<PtrToIntInst>(op->getNextNode());
+								//ptr_to_st_hash = dyn_cast<TruncInst>(op->getNextNode()->getNextNode()->getNextNode());
+								continue;
+							}
+
+							//do not create a fat pointer if its a normal integer or float or double . 
+							if(!op->getAllocatedType()->isIntegerTy(128) && (op->getAllocatedType()->isFloatTy() || op->getAllocatedType()->isDoubleTy() || op->getAllocatedType()->isIntegerTy())){
+								// errs()<<"Not cretaing a fat pointer as it is a normal interger/float/double\n";
+								continue;
+							}
+
+							//PtrToIntInst *trunc = new PtrToIntInst(op, Type::getInt32Ty(Ctx),"pti",op->getNextNode());
+							PtrToIntInst *trunc = new PtrToIntInst(op, Type::getInt32Ty(Ctx),"pti",insertPoint);
+
+							std::vector<Value *> args;
+							args.push_back(trunc);
+							args.push_back(ptr_to_st_cook);
+							BinaryOperator *bound;
+							if(dyn_cast<ConstantInt>(op->getArraySize())){
+								/*args.push_back(
+									llvm::ConstantInt::get(
+										Type::getInt32Ty(Ctx),
+										(D->getTypeAllocSize(op->getAllocatedType()))
+									)
+								);*/
+								Value *size =  llvm::ConstantInt::get(Type::getInt32Ty(Ctx),(D->getTypeAllocSize(op->getAllocatedType())));
+								bound = BinaryOperator::Create( Instruction::Add, trunc , size , "absolute_bnd", insertPoint); 
+							}
+							else
+							{
+								BinaryOperator *total_off =  BinaryOperator::Create(Instruction::Mul, op->getArraySize(), llvm::ConstantInt::get(Type::getInt64Ty(Ctx),(D->getTypeAllocSize(op->getAllocatedType()))) , "off", insertPoint);
+								TruncInst *total_off_trunc = new TruncInst(total_off, Type::getInt32Ty(Ctx),"offt", insertPoint);
+								bound = BinaryOperator::Create( Instruction::Add, trunc , total_off_trunc , "absolute_bnd", insertPoint); 
+								//args.push_back(total_off_trunc);
+							}
+							args.push_back(bound);
+							args.push_back(ptr_to_st_hash);
+							ArrayRef<Value *> args_ref(args);
+
+							IRBuilder<> Builder(insertPoint);
+							//Builder.SetInsertPoint(trunc->getNextNode());
+							Builder.SetInsertPoint(insertPoint);
+							Value *fpr = Builder.CreateCall(craftFunc, args_ref,op->getName()+"fpr");
+
+							//std::stack <User *> users;
+							//std::stack <int> pos;
+
+							// Replace all uses of pointer with fatpointer
+							op->replaceAllUsesWith(fpr);
+							// except in the ptrtoint instruction that uses the pointer to make a fatpointer
+							trunc->setOperand(0,op);
+							// errs()<<"End of AllocaInst transformation : "<<*op<<"\n";
+
+
+/**********************************************************************************************************************************************************************/
+// errs()<<"Here\n";
+							FunctionType *func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(ty)->getElementType());
+							std::vector<Type*> fParamTypes;
+							
+							Type *func_ret_type = func_type->getReturnType();
+							// errs()<<"Here 3 : "<<*func_ret_type<<"\n";
+							Type *fRetType;
+							if(func_type->getReturnType()->isPointerTy()){
+								if((dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()))
+									fRetType = resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func_ret_type)->getElementType()), GCtx);
+								else
+									fRetType = Type::getInt128Ty(GCtx);
+							}
+							else{
+								fRetType = func_ret_type;
+							}
+							// errs()<<"Here 4 : "<<*fRetType<<"\n";
+							for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
+								bool argIsFnArr = 0;
+								
+								if(dyn_cast<PointerType>(*k)){
+									argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
+								}
+								if((*k)->isPointerTy()){
+									if(!argIsFnArr)
+										fParamTypes.push_back(Type::getInt128Ty(GCtx));		
+									else{
+										FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+										Type *newSubType = resolveFunctionPointers(org_func_type, GCtx);
+										fParamTypes.push_back(newSubType);
+									}
+								}
+							}
+							// errs()<<"Here\n";
+							FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
+							// errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+							Type *newType = resolveFunctionPointers(func_type, GCtx);
+							elems_vec.push_back(newType);
+						}
+
+/**************************************************************************************************************************************************************************/
+// Handling global structs in array
+					if(glob->getValueType()->isArrayTy()){
+						ArrayType *t = dyn_cast<ArrayType>(glob->getValueType());
+						ArrayType *rec = t;
+						ArrayType *rec_old = t;
+						int depth=1;
+						std::stack <int> sizes;
+						sizes.push(t->getArrayNumElements());
+						while((rec = dyn_cast<ArrayType>(rec->getElementType())))
+						{
+							//errs()<<depth<<": "<<*rec<<"\n";
+							sizes.push(rec->getArrayNumElements());
+							rec_old = rec;
+							depth++;
+						}
+						Type *baseTy = rec_old->getElementType();
+						Type *newType;
+						if(baseTy->isStructTy()){
+							StructType* s1 = dyn_cast<StructType>(baseTy);
+							if(rep_structs.find(s1) != rep_structs.end()){
+								newType = rep_structs.at(s1);
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								// if(!glob->getInitializer()->isNullValue())
+								// Inserting even if initializer not there. Because by default memory allocated for array.
+								glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								errs()<<"HERE55: "<<*glob<<" "<<*glob2<<"\n";
+								continue;
+							}
+							else{
+								errs()<<"ERROR "<<*s1<<"\n";	
+							}
+						}
+						if(dyn_cast<PointerType>(baseTy)){
+							bool isFnArr = dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy();
+							if(!isFnArr){
+								newType = Type::getInt128Ty(GCtx);
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								// if(!glob->getInitializer()->isNullValue())
+								// Inserting even if initializer not there. Because by default memory allocated for array.
+								glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								errs()<<"HERE55: "<<*glob<<" "<<*glob2<<"\n";
+								continue;
+							}
+							else{
+								FunctionType *func_type = dyn_cast<FunctionType>(baseTy->getElementType());
+								std::vector<Type*> fParamTypes;
+								Type *func_ret_type = func_type->getReturnType();
+								Type *fRetType;
+								if(func_type->getReturnType()->isPointerTy()){
+									if((dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()))
+										fRetType = resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func_ret_type)->getElementType()), GCtx);
+									else
+										fRetType = Type::getInt128Ty(GCtx);
+								}
+								else{
+									fRetType = func_ret_type;
+								}
+								for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
+									bool argIsFnArr = 0;
+									if(dyn_cast<PointerType>(*k)){
+										argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
+									}
+									if((*k)->isPointerTy()){
+										if(!argIsFnArr)
+											fParamTypes.push_back(Type::getInt128Ty(GCtx));
+										else
+										{
+											FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+											Type *newSubType = resolveFunctionPointers(org_func_type, GCtx);
+											fParamTypes.push_back(newSubType);
+										}
+									}
+									else
+										fParamTypes.push_back(*k);
+								}
+								FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
+								//	errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+								newType = newFuncType->getPointerTo() ;
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+
+								//elems_vec.push_back(newType);
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								continue;	
+							}
+						}
+					}						

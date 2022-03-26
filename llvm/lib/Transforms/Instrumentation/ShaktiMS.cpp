@@ -26,6 +26,9 @@
 // #define debug_sms_pass_5
 // #define debug_craft_fat_pointer
 // #define debug_is_local
+// #define debug_sms_pass_5_fn_ptr
+// #define debug_sms_global_struct
+// #define local_array_struct
 
 using namespace llvm;
 
@@ -121,7 +124,7 @@ namespace {
 			std::vector< StructType * > structs = M.getIdentifiedStructTypes();
 			for(auto &def : structs)
 			{
-				errs()<<*def<<"\n";
+				// errs()<<*def<<"\n";
 				LLVMContext &GCtx = def->getContext();
 				bool flag = false;
 				std::vector<Type *> elems_vec;
@@ -160,7 +163,7 @@ namespace {
 							// errs()<<"Here 4 : "<<*fRetType<<"\n";
 							for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
 								bool argIsFnArr = 0;
-								errs()<<**k<<"\n";
+								// errs()<<**k<<"\n";
 								if(dyn_cast<PointerType>(*k)){
 									argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
 								}
@@ -214,20 +217,238 @@ namespace {
 				global_count++;
 				GlobalVariable *glob = dyn_cast<GlobalVariable>(j);
 				LLVMContext &GCtx = glob->getContext();
+				DataLayout *D = new DataLayout(&M);
+
+				#ifdef debug_sms_global_struct
+						errs()<<"HERE1 "<<*glob<<"\n";
+						errs()<<"HERE2 "<<*(glob->getValueType())<<"\n";
+						if(glob->getValueType()->isArrayTy()){
+							errs()<<"HERE5 "<<glob->getValueType()->getArrayElementType()->isStructTy()<<"\n";
+							errs()<<"HERE7 "<<*glob->getValueType()->getArrayElementType()<<"\n";
+							Type* t1 = glob->getValueType()->getArrayElementType();
+							
+							errs()<<"HERE8 "<<*t1<<"\n";
+							if(glob->getValueType()->getArrayElementType()->isStructTy()){
+								StructType* s1 = dyn_cast<StructType>(t1);
+								if(rep_structs.find(s1) != rep_structs.end()){
+									StructType* s2 = rep_structs.at(s1);
+									errs()<<"HERE9 "<<*s2<<"\n";
+								}
+							}			
+						}
+						// errs()<<"HERE3 "<<glob->getValueType()->isArrayTy()<<"\n";
+						// errs()<<"HERE4 "<<*(glob->getValueType()->getArrayElementType())<<"\n";
+						// errs()<<"HERE5 "<<glob->getValueType()->getArrayElementType()->isStructTy()<<"\n";
+						// errs()<<"HERE6 "<<*(glob->getType())<<"\n";
+				#endif
 				if(!glob->getType()->isPointerTy())
-				{
+				{	
 					continue;
-					//errs()<<*glob->getType()<<"\n";
 				}
+
+				#ifdef debug_sms_pass_5_fn_ptr
+					// std::string s = "__gmp_tmp_free";
+					// StringRef tmp_free_name = new StringRef(s);
+					// if(F.getName().str() == s){
+						errs()<<"Luck : "<<*glob->getType()<<" : "<<glob->getName()<<"\n";
+
+					// }
+				#endif
 				//errs()<<*glob<<" : "<<glob->isConstant()<<"\n";
+
 				if(glob->isConstant())
 					continue;
 				if(glob->hasInitializer())
 				{
+					// Handling global structs in array
+					if(glob->getValueType()->isArrayTy()){
+						ArrayType *t = dyn_cast<ArrayType>(glob->getValueType());
+						ArrayType *rec = t;
+						ArrayType *rec_old = t;
+						int depth=1;
+						std::stack <int> sizes;
+						// errs()<<"ArrayElementsNum: "<<t->getArrayNumElements()<<"\n";
+						// errs()<<"ArrayAllocSize1: "<<D->getTypeAllocSize(glob->getType())<<"\n";
+						// errs()<<"ArrayAllocSize2: "<<D->getTypeAllocSize(glob->getValueType())<<"\n";
+						sizes.push(t->getArrayNumElements());
+						while((rec = dyn_cast<ArrayType>(rec->getElementType())))
+						{
+							//errs()<<depth<<": "<<*rec<<"\n";
+							sizes.push(rec->getArrayNumElements());
+							rec_old = rec;
+							depth++;
+						}
+						Type *baseTy = rec_old->getElementType();
+						Type *newType;
+						if(baseTy->isStructTy()){
+							StructType* s1 = dyn_cast<StructType>(baseTy);
+							if(rep_structs.find(s1) != rep_structs.end()){
+								newType = rep_structs.at(s1);
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								// if(!glob->getInitializer()->isNullValue())
+								// Inserting even if initializer not there. Because by default memory allocated for array.
+								glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								continue;
+							}
+							else{
+								errs()<<"ERROR "<<*s1<<"\n";	
+							}
+						}
+						if(dyn_cast<PointerType>(baseTy)){
+							bool isFnArr = dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy();
+							if(!isFnArr){
+								newType = Type::getInt128Ty(GCtx);
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								// if(!glob->getInitializer()->isNullValue())
+								// Inserting even if initializer not there. Because by default memory allocated for array.
+								glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								continue;
+							}
+							else{
+
+								FunctionType *func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(baseTy)->getElementType());
+								std::vector<Type*> fParamTypes;
+								Type *func_ret_type = func_type->getReturnType();
+								Type *fRetType;
+								if(func_type->getReturnType()->isPointerTy()){
+									if((dyn_cast<PointerType>(func_ret_type)->getElementType()->isFunctionTy()))
+										fRetType = resolveFunctionPointers(dyn_cast<FunctionType>(dyn_cast<PointerType>(func_ret_type)->getElementType()), GCtx);
+									else
+										fRetType = Type::getInt128Ty(GCtx);
+								}
+								else{
+									fRetType = func_ret_type;
+								}
+								for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
+									bool argIsFnArr = 0;
+									if(dyn_cast<PointerType>(*k)){
+										argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
+									}
+									if((*k)->isPointerTy()){
+										if(!argIsFnArr)
+											fParamTypes.push_back(Type::getInt128Ty(GCtx));
+										else
+										{
+											FunctionType *org_func_type = dyn_cast<FunctionType>(dyn_cast<PointerType>(*k)->getElementType());
+											Type *newSubType = resolveFunctionPointers(org_func_type, GCtx);
+											fParamTypes.push_back(newSubType);
+										}
+									}
+									else
+										fParamTypes.push_back(*k);
+								}
+								FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
+								//	errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+								newType = newFuncType->getPointerTo() ;
+								while(depth)
+								{
+									int sz = sizes.top();
+									sizes.pop();
+									newType = ArrayType::get(newType,sz);
+									depth--;
+								}
+
+								//elems_vec.push_back(newType);
+								Constant *null_val = ConstantPointerNull::getNullValue(newType);
+								GlobalVariable *glob2 = new GlobalVariable
+								(
+									M,
+									newType,
+									glob->isConstant(),
+									glob->getLinkage(),
+									null_val,
+									"fpr_"+glob->getName(),
+									glob
+								);
+								glob->replaceAllUsesWith(glob2);
+								j--;
+								glob->dropAllReferences();
+								glob->eraseFromParent();
+								continue;	
+							}
+						}
+					}
+
+					// Handling global structs: ToDo remaining: Are structs checked w.r.t Shakti-MS?
+					if(glob->getValueType()->isStructTy()){
+						Type* t1 = glob->getValueType();
+						StructType* s1 = dyn_cast<StructType>(t1);
+						if(rep_structs.find(s1) != rep_structs.end()){
+							StructType* newType = rep_structs.at(s1);
+							// Type *newType = s2->getPointerTo();
+							Constant *null_val = ConstantPointerNull::getNullValue(newType);
+							GlobalVariable *glob2 = new GlobalVariable
+							(
+								M,
+								newType,
+								glob->isConstant(),
+								glob->getLinkage(),
+								null_val,
+								"fpr_"+glob->getName(),
+								glob
+							);
+							glob->replaceAllUsesWith(glob2);
+							if(!glob->getInitializer()->isNullValue()){
+								glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
+							}
+							j--;
+							glob->dropAllReferences();
+							glob->eraseFromParent();
+							continue;
+						}
+						else{
+							errs()<<"ERROR "<<*s1<<"\n";	
+						}
+					}
+
 					//todo
-					if(!glob->getValueType()->isPointerTy())
+					if(!glob->getValueType()->isPointerTy()){
 						continue;
-						//errs()<<"HERE"<<*glob<<"\n";
+					}
+
+					
 					//glob->mutateType(Type::getInt128Ty(GCtx));
 
 					//errs() << *glob << " : "  << dyn_cast<PointerType>(glob->getValueType())->getElementType()->isFunctionTy() << "\n " ;
@@ -249,7 +470,7 @@ namespace {
 								fParamTypes.push_back(*k);
 						}
 						FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
-					//	errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+						//	errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
 						Type *newType = newFuncType->getPointerTo() ;
 						//elems_vec.push_back(newType);
 						Constant *null_val = ConstantPointerNull::getNullValue(newType);
@@ -291,7 +512,7 @@ namespace {
 						glob_var.insert(std::make_pair(glob2, glob->getInitializer()));
 					}
 					//glob2->setParent(glob->getParent());
-					//errs()<<*glob<<"\n"<<*glob2<<"\n";
+					errs()<<*glob<<"\n"<<*glob2<<"\n";
 					j--;
 					glob->dropAllReferences();
 					glob->eraseFromParent();
@@ -303,8 +524,26 @@ namespace {
 				}
 			}
 
+			#ifdef debug_sms_global_struct
+				for(Module::global_iterator j = M.global_begin(), end = M.global_end(); j != end; ++j)
+				{	GlobalVariable *glob = dyn_cast<GlobalVariable>(j);
+					LLVMContext &GCtx = glob->getContext();
+					errs()<<"HERE1 "<<*glob<<"\n";
+				}
+			#endif
+
+			#ifdef debug_sms_pass_5_fn_ptr
+				for(Module::global_iterator j = M.global_begin(), end = M.global_end(); j != end; ++j)
+				{
+					GlobalVariable *glob = dyn_cast<GlobalVariable>(j);
+					LLVMContext &GCtx = glob->getContext();
+					errs()<<"Lucky : "<<*glob->getType()<<" : "<<glob->getName()<<"\n";
+				}
+			#endif
+
 			GlobalVariable *rodata_cookie;
 			//to add the rodata_cookie at the beginning of all the global variables.
+
 			if(global_count != 0){
 				GlobalVariable *first_global_var = dyn_cast<GlobalVariable>(M.global_begin());
 
@@ -631,7 +870,7 @@ namespace {
 					}
 					// errs()<<"\nChanging Func declaration: "<<func.getName()<<"\n";
 				}
-				//errs()<<"\n*****\nFound definition:\n"<<func<<"\n*****\n";
+				// errs()<<"\n*****\nFound definition:\n"<<func<<"\n*****\n";
 
 				std::vector<Type*> fParamTypes;
 				std::vector<Type*> fOriginalParamTypes;
@@ -697,6 +936,7 @@ namespace {
 				NF->getBasicBlockList().splice(NF->begin(), func.getBasicBlockList());
 				to_replace_functions.push(&func);
 				replace_with_functions.push(NF);
+				// errs()<<"HERE$%^: "<<*NF<<"\n";
 				argCount.push(arg_index);
 			}
 			//errs()<<"HERE\n";
@@ -895,11 +1135,54 @@ namespace {
 				//add those initializers of global variables here
 				if(!glob_var.empty() && F.getName() == "main"){
 					while (!glob_var.empty()){
-						//errs() << *glob_var.begin()->first << " => " << *glob_var.begin()->second << '\n';
+						errs() << *glob_var.begin()->first << " => " << *glob_var.begin()->second << '\n';
 						Value *val;
 						GlobalVariable *glob_ptr = dyn_cast<GlobalVariable>(glob_var.begin()->first);
 						PtrToIntInst *trunc;
 						std::vector<Value *> args;
+						
+						// Handling Arrays
+						if(glob_ptr->getValueType()->isArrayTy()){
+							ArrayType *t = dyn_cast<ArrayType>(glob_ptr->getValueType());
+							errs()<<"ArrayAllocSize21: "<<D->getTypeAllocSize(glob_ptr->getValueType())<<"\n";
+							errs()<<"ArrayAllocSize22: "<<glob_ptr->getName()<<"\n";
+							TypeSize total_sz = D->getTypeAllocSize(glob_ptr->getValueType());
+							// ArrayType *rec = t;
+							// ArrayType *rec_old = t;
+							// int depth=1;
+							// std::stack <int> sizes;
+							// sizes.push(t->getArrayNumElements());
+							// int total_sz = t->getArrayNumElements();
+							// while((rec = dyn_cast<ArrayType>(rec->getElementType())))
+							// {
+							// 	//errs()<<depth<<": "<<*rec<<"\n";
+							// 	total_sz = total_sz * rec->getArrayNumElements();
+							// 	sizes.push(rec->getArrayNumElements());
+							// 	rec_old = rec;
+							// 	depth++;
+							// }
+							// Type *baseTy = rec_old->getElementType();
+							PtrToIntInst *trunc = new PtrToIntInst(glob_ptr, Type::getInt32Ty(Ctx),"pti",insertPoint);
+							std::vector<Value *> args;
+							PtrToIntInst *ptr32 = new PtrToIntInst(rodata_cookie, Type::getInt32Ty(Ctx),"ptr32_1_",insertPoint);
+							Value* size = llvm::ConstantInt::get(Type::getInt32Ty(Ctx), total_sz);
+							BinaryOperator *bound = BinaryOperator::Create( Instruction::Add, trunc , size , "absolute_bnd", insertPoint); 
+
+							args.push_back(trunc);
+							args.push_back(ptr32);//base
+							args.push_back(bound);
+							args.push_back(ConstantInt::get(Type::getInt32Ty(Ctx),ro_hash));//hash
+							ArrayRef<Value *> args_ref(args);
+
+							IRBuilder<> Builder(insertPoint);
+							Builder.SetInsertPoint(insertPoint);
+							Value *fpr = Builder.CreateCall(craftFunc, args_ref,glob_ptr->getName());
+							new StoreInst (fpr, glob_ptr, insertPoint);
+							errs()<<"ArrayAllocSize2: "<<D->getTypeAllocSize(glob_ptr->getValueType())<<"\n";
+							glob_var.erase(glob_var.begin());
+							continue;
+						}
+
 						if(dyn_cast<GEPOperator>(glob_var.begin()->second)){
 							val = glob_var.begin()->second ;
 							trunc = new PtrToIntInst(val, Type::getInt32Ty(Ctx),"pti1_",insertPoint);
@@ -920,7 +1203,7 @@ namespace {
 								GEPOperator *gep = dyn_cast<GEPOperator>(val);
 								size = resolveGEPOperator(gep,D,Ctx);
 							}else{
-								size =  llvm::ConstantInt::get(Type::getInt32Ty(Ctx),(D->getTypeAllocSize(val->getType()))); // need to check
+								size = llvm::ConstantInt::get(Type::getInt32Ty(Ctx),(D->getTypeAllocSize(val->getType()))); // need to check
 							}
 
 							BinaryOperator *bound = BinaryOperator::Create( Instruction::Add, trunc , size , "absolute_bnd", insertPoint);
@@ -932,7 +1215,8 @@ namespace {
 							Builder.SetInsertPoint(insertPoint);
 							Value *fpr = Builder.CreateCall(craftFunc, args_ref,val->getName()+"_fprz");
 							new StoreInst (fpr, glob_ptr, insertPoint);
-						}else{
+						}
+						else{
 							new StoreInst (val, glob_ptr, insertPoint);
 						}
 						glob_var.erase(glob_var.begin());
@@ -952,6 +1236,14 @@ namespace {
 							errs()<<*I<<"\n";
 						#endif
 
+						#ifdef debug_sms_pass_5_fn_ptr
+							std::string s = "__gmp_tmp_free";
+							// StringRef tmp_free_name = new StringRef(s);
+							if(F.getName().str() == s){
+								errs()<<*I<<"\n";
+							}
+						#endif
+
 						if (auto *op = dyn_cast<AllocaInst>(I))
 						{	
 							// errs()<<"AllocaInst : "<<*I<<"\n";
@@ -959,7 +1251,7 @@ namespace {
 							{
 								op->mutateType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType()))->getPointerTo());
 								op->setAllocatedType(rep_structs.at(dyn_cast<StructType>(op->getAllocatedType())));
-								//errs()<<*op->getAllocatedType()<<"\n";
+								// errs()<<*op->getAllocatedType()<<"\n";
 							}
 							modified=true;
 							if(op->getAllocatedType()->isFunctionTy())
@@ -1020,7 +1312,8 @@ namespace {
 								}*/
 							}
 							else if(op->getAllocatedType()->isArrayTy())
-							{
+							{	
+
 								ArrayType *t = dyn_cast<ArrayType>(op->getAllocatedType());
 								ArrayType *rec = t;
 								ArrayType *rec_old = t;
@@ -1036,31 +1329,47 @@ namespace {
 								}
 
 								Type *baseTy = rec_old->getElementType();
+								Type *gelType;
+								bool changeBaseTy = false;
 
-								Type *gelType = Type::getInt128Ty(Ctx);
-								while(depth)
-								{
-									int sz = sizes.top();
-									sizes.pop();
-									gelType = ArrayType::get(gelType,sz);
-									depth--;
+								// Handling local array of struct 
+								if(baseTy->isStructTy()){
+									StructType* s_temp1 = dyn_cast<StructType>(baseTy);
+									if(rep_structs.find(s_temp1) != rep_structs.end()){
+										gelType = rep_structs.at(s_temp1);
+										changeBaseTy = true;
+									}
 								}
 
+								if(baseTy->isPointerTy()){
+									gelType = Type::getInt128Ty(Ctx);
+									changeBaseTy = true;
+								}
+								
 								bool isFnArr = 0;
 								if(dyn_cast<PointerType>(baseTy))
 								{
 									//errs()<<"Found array: "<<*op<<", baseTy = "<<dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy()<<"\n";
 									isFnArr = dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy();
+									if(isFnArr){
+										changeBaseTy = false;
+									}
 								}
-								if(baseTy->isPointerTy() && !(isFnArr))	//Only do if array is ptr array, and not a fn ptr array
+
+								if(changeBaseTy)	//Only do if array is ptr array/struct array, and not a fn ptr array
 								{
+									while(depth)
+									{
+										int sz = sizes.top();
+										sizes.pop();
+										gelType = ArrayType::get(gelType,sz);
+										depth--;
+									}	
 									//errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
 									//errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
 									op->setAllocatedType(gelType);
 									op->mutateType(gelType->getPointerTo());
-
 								}
-								//errs()<<*op<<"\n";
 							}
 							if (op->getName() == "stack_cookie")
 							{
@@ -1256,7 +1565,7 @@ namespace {
 						}
 
 						else if (auto *op = dyn_cast<LoadInst>(I))
-						{
+						{	
 							//errs()<< *op << "\n";
 							if(op->getOperand(0)->getType() == Type::getIntNPtrTy(Ctx,128))
 							{
@@ -1265,7 +1574,14 @@ namespace {
 							}
 							//errs()<<*op<<"\t"<<*op->getOperand(0)<<"\n";
 							if(op->getOperand(0)->getType() != Type::getInt128Ty(Ctx)){
-
+								#ifdef debug_sms_pass_5_fn_ptr
+										std::string s = "__gmp_tmp_free";
+										// StringRef tmp_free_name = new StringRef(s);
+										if(F.getName().str() == s){
+											// errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+											errs()<<"Sais : "<<*I<<"\n";
+										}
+								#endif
 								//errs() << "load inst : " << *op->getOperand(0)->getType() << "\n" ;
 								Type *base_type = op->getOperand(0)->getType() ;
 								int depth = 0;
@@ -1291,6 +1607,14 @@ namespace {
 									staticLoadStore(operand,I,&F,"Pointer access out of range.....",Ctx);
 									break;
 								}*/
+								#ifdef debug_sms_pass_5_fn_ptr
+										std::string s1 = "__gmp_tmp_free";
+										// StringRef tmp_free_name = new StringRef(s);
+										if(F.getName().str() == s1){
+											// errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+											errs()<<"Saiiss : "<<*I<<"\n";
+										}
+								#endif
 								continue;
 							}
 							Type *loadtype = op->getType();
@@ -1300,7 +1624,6 @@ namespace {
 								isFnArr = dyn_cast<PointerType>(loadtype)->getElementType()->isFunctionTy();
 								//errs()<<"LOADTYPE: "<<*loadtype<<"IsFn: "<<isFnArr<<"\n";
 							}
-
 
 							if (loadtype->isPointerTy())
 							{
@@ -1332,7 +1655,17 @@ namespace {
 									}
 //									FunctionType *fType =       FunctionType::get(fRetType, fParamTypes, func.getFunctionType()->isVarArg());
 									FunctionType *newFuncType = FunctionType::get(fRetType,fParamTypes,func_type->isVarArg());
-									//errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+									
+									#ifdef debug_sms_pass_5_fn_ptr
+										std::string s = "__gmp_tmp_free";
+										// StringRef tmp_free_name = new StringRef(s);
+										if(F.getName().str() == s){
+											errs() << "new function type : " << *newFuncType->getPointerTo() << "\n" ;
+											// errs()<<*I<<"\n";
+										}
+									#endif
+									
+									
 									Type *newType = newFuncType->getPointerTo() ;
 									loadtype = newType;
 								}
@@ -1386,7 +1719,7 @@ namespace {
 									StructType *st1 = dyn_cast<StructType>(pt1->getElementType());
 									if(st1->getName().contains("_reent") || st1->getName().contains("spec_fd_t"))
 									{
-										//errs()<<"STRUCT NAME: "<<st1->getName()<<"\n";
+										errs()<<"STRUCT NAME: "<<st1->getName()<<"\n";
 										continue;
 									}
 								}
@@ -1421,9 +1754,7 @@ namespace {
 						}
 						else if (auto *op = dyn_cast<CallInst>(I))
 						{
-							// errs()<<"CallInst : "<<*op<<"\n";
-							//errs()<<"\n";
-
+							
 							if(op->getCalledFunction() ==  NULL){
 								FunctionType *ftp =dyn_cast<FunctionType>(dyn_cast<PointerType>(op->getCalledOperand()->getType())->getElementType()); 
 								op->mutateFunctionType(ftp);
@@ -1453,8 +1784,6 @@ namespace {
 							{
 								if(!(op->getCalledFunction()->isDeclaration()) || (op->getCalledFunction()->getName().contains("__gm"))) // skip if definition exists in module
 								{
-									errs()<<"\n=************************************************\n";
-									errs()<<*op<<"\n";
 
 									//if the function 1st paramter type is i128 then remove all attribuetes of the parameter
 									//this is a problem for returning structs.
@@ -1952,6 +2281,13 @@ namespace {
 						}
 						//errs()<<*I;
 						//errs()<<"\n--------\n";
+						#ifdef debug_sms_pass_5_fn_ptr
+							std::string s1 = "__gmp_tmp_free";
+							// StringRef tmp_free_name = new StringRef(s);
+							if(F.getName().str() == s1){
+								errs()<<" => "<<*I<<"\n";
+							}
+						#endif
 					}
 
 				}
