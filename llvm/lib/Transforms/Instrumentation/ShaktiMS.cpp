@@ -33,6 +33,10 @@ static cl::opt<bool>
     EnableShaktiMS("enable-shakti-ms",
                  cl::desc("Enable-ShaktiMS Pass"), cl::init(false), cl::Hidden);
 
+static cl::opt<std::string>
+    IgnoreFilesShaktiMS("ignore-files-shakti-ms",
+                 cl::desc("Enable-ShaktiMS Pass"), cl::init(""), cl::Hidden);
+
 Type* resolveFunctionPointers(FunctionType *func_type, LLVMContext &Ctx);
 void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs);
 Value* resolveGEPOperator(GEPOperator *GI,DataLayout *D,LLVMContext &Context);
@@ -53,6 +57,43 @@ namespace {
 			if(EnableShaktiMS == false){
 				return 0;
 			}
+
+			errs()<<"Source File Name : "<<M.getSourceFileName()<<"\n";
+			errs()<<"IgnoreFiles : "<<IgnoreFilesShaktiMS<<"\n";
+
+			
+			std::string source_filename = M.getSourceFileName();
+			size_t pos_sf = source_filename.find_last_of("/");
+			if(source_filename.find_last_of("/") == std::string::npos){
+				pos_sf = -1;
+			}
+			std::string sanitize_source_filename = source_filename.substr(pos_sf + 1);
+			// errs()<<"Sasddai : "<<pos_sf<<" : "<<sanitize_source_filename<<"\n";
+
+		
+			std::string del = ",";
+			int start = 0;
+    		int end = IgnoreFilesShaktiMS.find(del);
+    		std::string ignore_file;
+    		int ignore_matches = 0;
+    		while (end != -1) {
+    			ignore_file = IgnoreFilesShaktiMS.substr(start, end - start);
+        		// errs() << ignore_file << "\n";
+        		start = end + del.size();
+        		end = IgnoreFilesShaktiMS.find(del, start);
+        		if(ignore_file.compare(sanitize_source_filename) == 0){
+        			ignore_matches = 1;
+        		}
+    		}
+    		ignore_file = IgnoreFilesShaktiMS.substr(start, end - start);
+    		// errs() << ignore_file << "\n";
+    		if(ignore_file.compare(sanitize_source_filename) == 0){
+        			ignore_matches = 1;
+        	}
+    		if(ignore_matches){
+    			errs()<<"No Shakti-MS pass"<<"\n";
+    			return 0;
+    		}
 
 			errs()<<"********************************************\n";
 			// To skip the Shakti-MS pass if the no functions present in the module
@@ -134,6 +175,11 @@ namespace {
 					if(dyn_cast<PointerType>(ty)){
 						isFnArr = dyn_cast<PointerType>(ty)->getElementType()->isFunctionTy();
 					}
+					
+					// Array within struct
+					
+
+
 					if(ty->isPointerTy())
 					{
 						//convert normal pointers to i128 leave function pointers.
@@ -1060,7 +1106,7 @@ namespace {
 									op->mutateType(gelType->getPointerTo());
 
 								}
-								//errs()<<*op<<"\n";
+								errs()<<*op<<"\n";
 							}
 							if (op->getName() == "stack_cookie")
 							{
