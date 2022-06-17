@@ -23,18 +23,27 @@
 #include <map>
 #include <fstream>
 
+#include <cstdlib>
+#include <string>
+#include "llvm/MC/MCSection.h"
+// #include <unistd>
+
 using namespace llvm;
 
 bool status  = 0;
 
-std::map <std::string, uint8_t> compartment_function_map;
-uint8_t default_compartment = 266; // currently 0-255 valid compartment range
+std::map <std::string, int> compartment_function_map;
 
 static cl::opt<std::string> CapFilePath(
     "cap-file-path",
-    cl::desc("Write to given path after running pass"),
+    cl::desc("Path where function-compartment mapping (.cap) file is present."),
     cl::Hidden);
 
+static cl::opt<int> default_compartment(
+    "default-compartment-id",
+    cl::desc("Default compartment id. Alternate way to set this, is \":<default_compartment_id>\" at the start of the .cap file."),
+    cl::init(266), // currently 0-255 valid compartment range
+    cl::Hidden);
 
 #define RISCV_EXPAND_CHECKCAP_PSEUDO_NAME "RISCV pseudo instruction expansion pass"
 
@@ -64,8 +73,10 @@ void initialize_compartment_map(std::string source_filename_with_ext){
          default_set = 1;
         }
         std::string function_name = myText.substr(0, myText.find_last_of(":"));
-        uint8_t compartment_id = std::stoi(myText.substr(myText.find_last_of(":")+1));
-        compartment_function_map.insert(std::pair<std::string, uint8_t>(function_name, compartment_id)); 
+        
+        int compartment_id = std::stoi(myText.substr(myText.find_last_of(":")+1));
+        compartment_function_map.insert(std::pair<std::string, int>(function_name, compartment_id));
+
       }
     }
     CapFile.close();
@@ -92,6 +103,21 @@ public:
 
 char RISCVExpandCheckcapPseudo::ID = 0;
 
+// Replace '/' with "__"
+std::string sanitize(std::string name, char ch){
+  std::string new_name = "";
+  for (std::string::size_type i = 0; i < name.size(); i++) {
+    if(name[i] == ch){
+      new_name.append(2, '_');
+    }
+    else{
+      new_name.append(1, name[i]);
+    }
+  }
+ return new_name;
+}
+
+
 bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   unsigned num_instr = 0;
   TII = static_cast<const RISCVInstrInfo *>(MF.getSubtarget().getInstrInfo());
@@ -101,15 +127,17 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   MachineBasicBlock::iterator FirstMBBI = FirstMBB.begin();
   // errs() << *FirstMBBI;
 
+  std::string source_filename_with_ext((MF.getFunction()).getParent()->getSourceFileName());
   if(status == 0){
     std::string source_filename((MF.getFunction()).getParent()->getSourceFileName());
-    initialize_compartment_map(source_filename);
+    initialize_compartment_map(sanitize(source_filename_with_ext, '/'));  
     status = 1;
   }
 
   std::string functionName = MF.getName().str();
-  uint8_t compartment_id = default_compartment;
-  std::map <std::string, uint8_t>::iterator it;
+  int compartment_id = default_compartment;
+  std::map <std::string, int>::iterator it;
+
   it  = compartment_function_map.find(functionName);
   if(it != compartment_function_map.end()){
     compartment_id = compartment_function_map.at(functionName);
@@ -117,7 +145,31 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
     .addImm(compartment_id);
 
-  // errs() << "\nFinished\n\n";
+// Generating .cap file where all function-compartmentId mappings would be present
+  std::string linker_cap_file_path = getenv("LINKER_CAP_FILE_PATH");
+  std::string source_filename = sanitize(source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of(".")), '/');
+  std::string linker_cap_file_name_with_ext (linker_cap_file_path);
+  linker_cap_file_name_with_ext.append("/");
+  linker_cap_file_name_with_ext.append(source_filename);
+  linker_cap_file_name_with_ext.append(".cap");
+  std::ofstream linker_cap_file;
+  // std::string cmd("touch ");
+  // cmd.append(linker_cap_file_name_with_ext);
+  // int status = system(cmd.c_str());
+  linker_cap_file.open(linker_cap_file_name_with_ext, std::ios::out | std::ios::app);
+  errs()<<linker_cap_file_name_with_ext<<"\n";
+  if(linker_cap_file.is_open()){ 
+    errs()<<"Written"<<compartment_id<<"\n";
+    linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
+  }
+  linker_cap_file.close();  
+
+  // if(functionName.compare("__gmp_randclear") == 0){
+    // errs() << "\nSource Filename: " <<source_filename<<"\nLinkerCap Filename: "<<linker_cap_file_name_with_ext;    
+  // }
+
+  // errs() << "\nFinished Section : " << (MF.getSection())->getName()<<"\n\n";
+
   // errs() << "\nmcount --- " << MF.getName() << " has " << num_instr << " instructions.\n";
   // errs() << InputFileName;
   // errs() << "\n" << (MF.getFunction()).getParent()->getSourceFileName();
