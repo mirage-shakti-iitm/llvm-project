@@ -161,6 +161,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   if(linker_cap_file.is_open()){ 
     errs()<<"Written"<<compartment_id<<"\n";
     linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
+    errs()<<functionName<<":"<<compartment_id<<"\n";
   }
   linker_cap_file.close();  
 
