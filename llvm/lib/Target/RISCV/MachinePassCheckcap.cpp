@@ -22,7 +22,7 @@
 #include "llvm/ADT/StringRef.h"
 #include <map>
 #include <fstream>
-
+#include "llvm/IR/Function.h"
 #include <cstdlib>
 #include <string>
 #include "llvm/MC/MCSection.h"
@@ -33,6 +33,8 @@ using namespace llvm;
 bool status  = 0;
 
 std::map <std::string, int> compartment_function_map;
+
+int func_id = 0;
 
 static cl::opt<std::string> CapFilePath(
     "cap-file-path",
@@ -116,7 +118,10 @@ std::string sanitize(std::string name, char ch){
   }
  return new_name;
 }
-
+// ronald reagan
+// princy edams
+// winston churchill
+// karunanidhi
 
 bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   unsigned num_instr = 0;
@@ -127,6 +132,17 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   MachineBasicBlock::iterator FirstMBBI = FirstMBB.begin();
   // errs() << *FirstMBBI;
 
+  // Function f = MF.getFunction();
+  std::string functionName = MF.getName().str();
+  std::string ts_1 = ".text.";
+  std::string ts_2 = functionName;
+  ts_2.append("_");
+  ts_2.append(std::to_string(func_id));
+  func_id += 1;
+  std::string ts = ts_1 + ts_2;
+  MF.getFunction().setSection(StringRef(ts));
+  errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
+
   std::string source_filename_with_ext((MF.getFunction()).getParent()->getSourceFileName());
   if(status == 0){
     std::string source_filename((MF.getFunction()).getParent()->getSourceFileName());
@@ -134,7 +150,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
     status = 1;
   }
 
-  std::string functionName = MF.getName().str();
+  
   int compartment_id = default_compartment;
   std::map <std::string, int>::iterator it;
 
@@ -150,7 +166,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   std::string source_filename = sanitize(source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of(".")), '/');
   std::string linker_cap_file_name_with_ext (linker_cap_file_path);
   linker_cap_file_name_with_ext.append("/");
-  linker_cap_file_name_with_ext.append(source_filename);
+  linker_cap_file_name_with_ext.append("setu_c");
   linker_cap_file_name_with_ext.append(".cap");
   std::ofstream linker_cap_file;
   // std::string cmd("touch ");
@@ -160,10 +176,14 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   errs()<<linker_cap_file_name_with_ext<<"\n";
   if(linker_cap_file.is_open()){ 
     errs()<<"Written"<<compartment_id<<"\n";
-    linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
-    errs()<<functionName<<":"<<compartment_id<<"\n";
+    // linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
+    linker_cap_file<<ts_2<<":"<<compartment_id<<"\n";
+    errs()<<ts<<":"<<compartment_id<<"\n";
   }
   linker_cap_file.close();  
+
+
+  
 
   // if(functionName.compare("__gmp_randclear") == 0){
     // errs() << "\nSource Filename: " <<source_filename<<"\nLinkerCap Filename: "<<linker_cap_file_name_with_ext;    
