@@ -33,6 +33,8 @@ using namespace llvm;
 bool status  = 0;
 
 std::map <std::string, int> compartment_function_map;
+std::map <std::string, int> checkcap_function_map;
+
 
 int func_id = 0;
 
@@ -45,6 +47,12 @@ static cl::opt<int> default_compartment(
     "default-compartment-id",
     cl::desc("Default compartment id. Alternate way to set this, is \":<default_compartment_id>\" at the start of the .cap file."),
     cl::init(266), // currently 0-255 valid compartment range
+    cl::Hidden);
+
+static cl::opt<bool> no_checkcap(
+    "no-checkcap",
+    cl::desc("Do not insert checkcap instruction at the start of function(mainly used for cmparing non-SM overhead)"),
+    cl::init(false),
     cl::Hidden);
 
 #define RISCV_EXPAND_CHECKCAP_PSEUDO_NAME "RISCV pseudo instruction expansion pass"
@@ -69,16 +77,22 @@ void initialize_compartment_map(std::string source_filename_with_ext){
       while (getline (CapFile, myText)) {
         if(default_set == 0){
           std::size_t pos = myText.find_last_of(":");
-          if(pos == std::string::npos){
-            default_compartment = std::stoi(myText);
+          if(pos == 0){
+            default_compartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
+            // default_compartment = std::stoi(myText);
          }
          default_set = 1;
         }
-        std::string function_name = myText.substr(0, myText.find_last_of(":"));
-        
-        int compartment_id = std::stoi(myText.substr(myText.find_last_of(":")+1));
-        compartment_function_map.insert(std::pair<std::string, int>(function_name, compartment_id));
-
+        else{
+          int checkcap_enable = std::stoi(myText.substr(myText.find_last_of(":")+1));
+          std::string func_name_id_str = myText.substr(0, myText.find_last_of(":"));
+          std::string function_name = func_name_id_str.substr(0, func_name_id_str.find_last_of(":"));
+          int compartment_id = std::stoi(func_name_id_str.substr(func_name_id_str.find_last_of(":")+1));
+          compartment_function_map.insert(std::pair<std::string, int>(function_name, compartment_id));
+          if(checkcap_enable){
+            checkcap_function_map.insert(std::pair<std::string, int>(function_name, 1));
+          }
+        }
       }
     }
     CapFile.close();
@@ -134,14 +148,14 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
 
   // Function f = MF.getFunction();
   std::string functionName = MF.getName().str();
-  std::string ts_1 = ".text.";
-  std::string ts_2 = functionName;
-  ts_2.append("_");
-  ts_2.append(std::to_string(func_id));
-  func_id += 1;
-  std::string ts = ts_1 + ts_2;
-  MF.getFunction().setSection(StringRef(ts));
-  errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
+  // std::string ts_1 = ".text.";
+  // std::string ts_2 = functionName;
+  // ts_2.append("_");
+  // ts_2.append(std::to_string(func_id));
+  // func_id += 1;
+  // std::string ts = ts_1 + ts_2;
+  // MF.getFunction().setSection(StringRef(ts));
+  // errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
 
   std::string source_filename_with_ext((MF.getFunction()).getParent()->getSourceFileName());
   if(status == 0){
@@ -152,14 +166,28 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
 
   
   int compartment_id = default_compartment;
+  int checkcap_insert = 0;
   std::map <std::string, int>::iterator it;
 
   it  = compartment_function_map.find(functionName);
   if(it != compartment_function_map.end()){
     compartment_id = compartment_function_map.at(functionName);
   }
-  BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
-    .addImm(compartment_id);
+
+  it  = checkcap_function_map.find(functionName);
+  if(it != checkcap_function_map.end()){
+    checkcap_insert = 1;
+  }
+
+  std::string ts = ".text.c.";
+  ts.append(std::to_string(compartment_id));
+  MF.getFunction().setSection(StringRef(ts));
+  errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
+
+  if((!no_checkcap) && (checkcap_insert == 1)){
+    BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
+      .addImm(compartment_id);
+  }
 
 // Generating .cap file where all function-compartmentId mappings would be present
   std::string linker_cap_file_path = getenv("LINKER_CAP_FILE_PATH");
@@ -177,7 +205,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   if(linker_cap_file.is_open()){ 
     errs()<<"Written"<<compartment_id<<"\n";
     // linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
-    linker_cap_file<<ts_2<<":"<<compartment_id<<"\n";
+    linker_cap_file<<ts<<":"<<compartment_id<<"\n";
     errs()<<ts<<":"<<compartment_id<<"\n";
   }
   linker_cap_file.close();  
