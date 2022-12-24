@@ -166,7 +166,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
 
   
   int compartment_id = default_compartment;
-  int checkcap_insert = 0;
+  int checkcap_insert = 1;
   std::map <std::string, int>::iterator it;
 
   it  = compartment_function_map.find(functionName);
