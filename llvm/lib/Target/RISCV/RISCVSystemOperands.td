@@ -370,3 +370,22 @@ def : SysReg<"vxrm", 0x00A>;
 def : SysReg<"vl", 0xC20>;
 def : SysReg<"vtype", 0xC21>;
 def : SysReg<"vlenb", 0xC22>;
+
+
+//===-----------------------------------------------
+// Fides CSRs
+//===-----------------------------------------------
+def : SysReg<"comctl", 0x7f0>;
+def : SysReg<"commat", 0x7f1>;
+def : SysReg<"compcbnb", 0x7f2>;
+def : SysReg<"comexcvec", 0x7f3>;
+def : SysReg<"comexccause", 0x7f4>;
+def : SysReg<"currcom", 0x7f5>;
+def : SysReg<"targetcom", 0x7f6>;
+def : SysReg<"checkcomsp", 0x7f7>;
+def : SysReg<"curcompcstart", 0x7f8>;
+def : SysReg<"curcompcend", 0x7f9>;
+def : SysReg<"parcompcstart", 0x7fa>;
+def : SysReg<"anycompcstart", 0x7fb>;
+def : SysReg<"anycompcend", 0x7fc>;
+def : SysReg<"comepc", 0x7fd>;

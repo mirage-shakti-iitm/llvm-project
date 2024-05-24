@@ -1067,6 +1067,7 @@ namespace {
 							}
 							else if(op->getAllocatedType()->isArrayTy())
 							{
+								
 								ArrayType *t = dyn_cast<ArrayType>(op->getAllocatedType());
 								ArrayType *rec = t;
 								ArrayType *rec_old = t;
@@ -1095,13 +1096,13 @@ namespace {
 								bool isFnArr = 0;
 								if(dyn_cast<PointerType>(baseTy))
 								{
-									//errs()<<"Found array: "<<*op<<", baseTy = "<<dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy()<<"\n";
+									// errs()<<"Found array: "<<*op<<", baseTy = "<<dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy()<<"\n";
 									isFnArr = dyn_cast<PointerType>(baseTy)->getElementType()->isFunctionTy();
 								}
 								if(baseTy->isPointerTy() && !(isFnArr))	//Only do if array is ptr array, and not a fn ptr array
 								{
-									//errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
-									//errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
+									errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
+									errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
 									op->setAllocatedType(gelType);
 									op->mutateType(gelType->getPointerTo());
 

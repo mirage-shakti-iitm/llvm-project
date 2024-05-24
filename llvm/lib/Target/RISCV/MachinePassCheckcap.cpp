@@ -67,13 +67,16 @@ void initialize_compartment_map(std::string source_filename_with_ext){
     cap_filename.append("/");
     std::string source_filename = source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of("."));
     cap_filename.append(source_filename);
+    errs()<<"\n source_filename: "<<source_filename<<"\n";
     cap_filename.append(".cap");
     std::ifstream CapFile;
+    errs()<<"\nCap filename:"<<cap_filename;
     CapFile.open(cap_filename);
     std::string myText;
     bool default_set = 0;
     // Use a while loop together with the getline() function to read the file line by line
     if(CapFile){
+      errs()<<"PAssed\n";
       while (getline (CapFile, myText)) {
         if(default_set == 0){
           std::size_t pos = myText.find_last_of(":");
@@ -194,7 +197,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   std::string source_filename = sanitize(source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of(".")), '/');
   std::string linker_cap_file_name_with_ext (linker_cap_file_path);
   linker_cap_file_name_with_ext.append("/");
-  linker_cap_file_name_with_ext.append("setu_c");
+  linker_cap_file_name_with_ext.append("fides_c");
   linker_cap_file_name_with_ext.append(".cap");
   std::ofstream linker_cap_file;
   // std::string cmd("touch ");
