@@ -169,7 +169,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
 
   
   int compartment_id = default_compartment;
-  int checkcap_insert = 1;
+  bool checkcap_insert = false;
   std::map <std::string, int>::iterator it;
 
   it  = compartment_function_map.find(functionName);
@@ -179,7 +179,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
 
   it  = checkcap_function_map.find(functionName);
   if(it != checkcap_function_map.end()){
-    checkcap_insert = 1;
+    checkcap_insert = true;
   }
 
   std::string ts = ".text.c.";
@@ -187,31 +187,33 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   MF.getFunction().setSection(StringRef(ts));
   errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
 
-  if((!no_checkcap) && (checkcap_insert == 1)){
+  if((!no_checkcap) && (checkcap_insert)){
     BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
       .addImm(compartment_id);
   }
+  errs()<<"Section name: 2"<<MF.getFunction().getSection().str()<<"\n";
+
 
 // Generating .cap file where all function-compartmentId mappings would be present
-  std::string linker_cap_file_path = getenv("LINKER_CAP_FILE_PATH");
-  std::string source_filename = sanitize(source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of(".")), '/');
-  std::string linker_cap_file_name_with_ext (linker_cap_file_path);
-  linker_cap_file_name_with_ext.append("/");
-  linker_cap_file_name_with_ext.append("fides_c");
-  linker_cap_file_name_with_ext.append(".cap");
-  std::ofstream linker_cap_file;
+  // std::string linker_cap_file_path = getenv("LINKER_CAP_FILE_PATH");
+  // std::string source_filename = sanitize(source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of(".")), '/');
+  // std::string linker_cap_file_name_with_ext (linker_cap_file_path);
+  // linker_cap_file_name_with_ext.append("/");
+  // linker_cap_file_name_with_ext.append("fides_c");
+  // linker_cap_file_name_with_ext.append(".cap");
+  // std::ofstream linker_cap_file;
   // std::string cmd("touch ");
   // cmd.append(linker_cap_file_name_with_ext);
   // int status = system(cmd.c_str());
-  linker_cap_file.open(linker_cap_file_name_with_ext, std::ios::out | std::ios::app);
-  errs()<<linker_cap_file_name_with_ext<<"\n";
-  if(linker_cap_file.is_open()){ 
-    errs()<<"Written"<<compartment_id<<"\n";
+  // linker_cap_file.open(linker_cap_file_name_with_ext, std::ios::out | std::ios::app);
+  // errs()<<linker_cap_file_name_with_ext<<"\n";
+  // if(linker_cap_file.is_open()){ 
+    // errs()<<"Written"<<compartment_id<<"\n";
     // linker_cap_file<<functionName<<":"<<compartment_id<<"\n";
-    linker_cap_file<<ts<<":"<<compartment_id<<"\n";
-    errs()<<ts<<":"<<compartment_id<<"\n";
-  }
-  linker_cap_file.close();  
+    // linker_cap_file<<ts<<":"<<compartment_id<<"\n";
+    // errs()<<ts<<":"<<compartment_id<<"\n";
+  // }
+  // linker_cap_file.close();  
 
 
   
