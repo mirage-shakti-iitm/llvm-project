@@ -55,6 +55,12 @@ static cl::opt<bool> no_checkcap(
     cl::init(false),
     cl::Hidden);
 
+static cl::opt<bool> all_checkcap(
+    "all-checkcap",
+    cl::desc("Insert checkcap instruction at all functions"),
+    cl::init(false),
+    cl::Hidden);
+
 #define RISCV_EXPAND_CHECKCAP_PSEUDO_NAME "RISCV pseudo instruction expansion pass"
 
 
@@ -187,7 +193,7 @@ bool RISCVExpandCheckcapPseudo::runOnMachineFunction(MachineFunction &MF) {
   MF.getFunction().setSection(StringRef(ts));
   errs()<<"Section name: "<<MF.getFunction().getSection().str()<<"\n";
 
-  if((!no_checkcap) && (checkcap_insert)){
+  if((!no_checkcap) && (checkcap_insert) || (all_checkcap)){
     BuildMI(FirstMBB, FirstMBBI, DL, TII->get(RISCV::CHECKCAP))
       .addImm(compartment_id);
   }
