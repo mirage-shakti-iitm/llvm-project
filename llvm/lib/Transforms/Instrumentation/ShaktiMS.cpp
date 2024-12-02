@@ -38,7 +38,7 @@ static cl::opt<std::string>
                  cl::desc("Enable-ShaktiMS Pass"), cl::init(""), cl::Hidden);
 
 Type* resolveFunctionPointers(FunctionType *func_type, LLVMContext &Ctx);
-void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs);
+void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs, StringRef func_name);
 Value* resolveGEPOperator(GEPOperator *GI,DataLayout *D,LLVMContext &Context);
 void staticLoadStore(GEPOperator* operand,Instruction *I,Function *F,std::string str,LLVMContext &Ctx);
 bool isLocal(Instruction *ins);
@@ -113,8 +113,8 @@ namespace {
 								if(ConstantInt *CI = dyn_cast<ConstantInt>(GI->getOperand(1))){
 									if(CI->isNegative()){
 
-										//errs() << "!!!!!!!!!!!Warning Pointer Decrement in function  : " << F.getName() << "!!!!!!!!!!!!!!!!!!!\n" ;
-										//errs() << *GI->getOperand(0) << "\n" ;
+										// errs() << "Sai 1 !!!!!!!!!!!Warning Pointer Decrement in function  : " << F.getName() << "!!!!!!!!!!!!!!!!!!!\n" ;
+										// errs() << F.getName() << ": " << *GI->getOperand(0) << "\n" ;
 										// errs() << F.getName() ;
 										func_name.insert(F.getName().str());
 
@@ -124,7 +124,7 @@ namespace {
 										if(I->getOpcode() == Instruction::Sub){
 
 											//errs() << "!!!!!!!!!!!Warning Pointer Decrement in function  : " << F.getName() << "!!!!!!!!!!!!!!!!!!!\n" ;
-											//errs() << *GI->getOperand(0) << "\n" ;
+											errs() << F.getName() << ": " << *GI << " : "<<*GI->getOperand(0) << " : " << *GI->getOperand(1) << "\n" ;
 											func_name.insert(F.getName().str());
 										}
 									}
@@ -162,7 +162,7 @@ namespace {
 			std::vector< StructType * > structs = M.getIdentifiedStructTypes();
 			for(auto &def : structs)
 			{
-				errs()<<*def<<"\n";
+				// errs()<<*def<<"\n";
 				LLVMContext &GCtx = def->getContext();
 				bool flag = false;
 				std::vector<Type *> elems_vec;
@@ -206,7 +206,7 @@ namespace {
 							// errs()<<"Here 4 : "<<*fRetType<<"\n";
 							for(FunctionType::param_iterator k = func_type->param_begin(), endp = func_type->param_end(); k != endp; ++k){
 								bool argIsFnArr = 0;
-								errs()<<**k<<"\n";
+								// errs()<<**k<<"\n";
 								if(dyn_cast<PointerType>(*k)){
 									argIsFnArr = dyn_cast<PointerType>(*k)->getElementType()->isFunctionTy();
 								}
@@ -249,7 +249,7 @@ namespace {
 					const StructLayout *SL_from = D->getStructLayout(frm);
 					unsigned long long to_sz = SL_to->getSizeInBytes();
 					unsigned long long from_sz = SL_from->getSizeInBytes();
-					errs()<<"------------------\nINSERTING "<<*frm<<" : size = "<<from_sz<<"\nTO "<<*to<<" : size = "<<to_sz<<"\n------------------\n";
+					// errs()<<"------------------\nINSERTING "<<*frm<<" : size = "<<from_sz<<"\nTO "<<*to<<" : size = "<<to_sz<<"\n------------------\n";
 					rep_structs.insert(std::make_pair(frm, to));
 				}
 			}
@@ -628,7 +628,7 @@ namespace {
 						ptr_to_st_hash = new TruncInst(hash64, Type::getInt32Ty(Ctx),"stack_hash", FPR);
 						stack_cook_ins = true;
 						modified  = true;
-						errs() << "Stack Cookie Inserted \n" ;
+						// errs() << "Stack Cookie Inserted \n" ;
 					}
 				}
 				//set up arguments
@@ -672,7 +672,7 @@ namespace {
 				{
 					
 					if(!func.getName().contains("__gm")){
-						errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
+						// errs()<<"\nSkipping func declaration: "<<func.getName()<<"\n";
 						continue;
 					}
 					// errs()<<"\nChanging Func declaration: "<<func.getName()<<"\n";
@@ -990,6 +990,7 @@ namespace {
 
 				for (auto &B : F)
 				{
+					StringRef curr_func_name = F.getName();
 					for(BasicBlock::iterator i = B.begin(), e = B.end(); i != e; ++i)
 					{
 						Instruction *I = dyn_cast<Instruction>(i);
@@ -1101,13 +1102,13 @@ namespace {
 								}
 								if(baseTy->isPointerTy() && !(isFnArr))	//Only do if array is ptr array, and not a fn ptr array
 								{
-									errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
-									errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
+									// errs()<<"\n*********\nALLOCATED TYPE = "<<*op->getAllocatedType()->getArrayElementType()<<"\n\n";
+									// errs()<<*(ArrayType::get(Type::getInt128Ty(Ctx),op->getAllocatedType()->getArrayNumElements()))<<"\n";
 									op->setAllocatedType(gelType);
 									op->mutateType(gelType->getPointerTo());
 
 								}
-								errs()<<*op<<"\n";
+								// errs()<<*op<<"\n";
 							}
 							if (op->getName() == "stack_cookie")
 							{
@@ -1450,7 +1451,8 @@ namespace {
 
 							modified=true;
 							//errs()<<"\n-----------\n"<<*op<<"\n-----------\n";
-							resolveGetElementPtr(op,D,Ctx,rep_structs);
+							resolveGetElementPtr(op,D,Ctx,rep_structs, curr_func_name);
+							errs()<<"FINISHED\n";
 
 							--i;
 							op->dropAllReferences();
@@ -1500,8 +1502,8 @@ namespace {
 							{
 								if(!(op->getCalledFunction()->isDeclaration()) || (op->getCalledFunction()->getName().contains("__gm"))) // skip if definition exists in module
 								{
-									errs()<<"\n=************************************************\n";
-									errs()<<*op<<"\n";
+									// errs()<<"\n=************************************************\n";
+									// errs()<<*op<<"\n";
 
 									//if the function 1st paramter type is i128 then remove all attribuetes of the parameter
 									//this is a problem for returning structs.
@@ -1787,7 +1789,7 @@ namespace {
 								//if you are using a global pointer in printf scanf or other system calls then collapse that pointer to i8* or to the required pointer type before calling.
 								if(op->getCalledFunction()!=NULL ) { //&& (!op->getCalledFunction()->isIntrinsic()) //&& op->getCalledFunction()->isDeclaration() -- not required as it will readh here only if its a declaration
 										if(op->getOperand(i)->getType() == Type::getInt128Ty(Ctx)){
-											errs() <<  "before : " << *op << "\n" ;
+											// errs() <<  "before : " << *op << "\n" ;
 											//truncte to i8* and then pass to the function
 
 											//validate the pointer 
@@ -1812,7 +1814,8 @@ namespace {
 											//type cast to i8* 
 											Type *ptype = Type::getInt8PtrTy(Ctx);
 											if(op->getCalledFunction() != NULL)
-											{	errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
+											{	
+												// errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
 												if(!op->getCalledFunction()->isVarArg())
 												{
 													ptype = op->getCalledFunction()->getFunctionType()->params()[i];
@@ -1820,7 +1823,7 @@ namespace {
 												else if(i < op->getCalledFunction()->getFunctionType()->params().size())
 												{
 													ptype = op->getCalledFunction()->getFunctionType()->params()[i];
-													errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
+													// errs()<<*(op->getCalledFunction()->getFunctionType())<<"\n";
 												}
 											}
 
@@ -1833,7 +1836,7 @@ namespace {
 											op->setOperand(i,ptr);
 											op->getOperand(i)->mutateType(ptype);
 											continue;
-											errs() <<  "after : " << *op << "\n" ;
+											// errs() <<  "after : " << *op << "\n" ;
 										}
 								}
 								//if(op->getCalledFunction()->getName() == "fprintf")
@@ -1860,7 +1863,7 @@ namespace {
 								Builder.SetInsertPoint(I);
 								Builder.CreateCall(val, args_ref,"");
 
-								errs()<<*op<<"\n";
+								// errs()<<*op<<"\n";
 								Type *ptype = Type::getInt8PtrTy(Ctx);;
 								if(op->getCalledFunction() != NULL)
 								{
@@ -2223,9 +2226,10 @@ Value* resolveGEPOperator(GEPOperator *GI,DataLayout *D,LLVMContext &Context)
 }
 
 
-void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs)
+void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Context,std::map <StructType*, StructType*> rep_structs, StringRef func_name)
 {
 
+	bool isSub = false;
 	int offset = 0;
 	Value *Offset,*temp;
 	int c = 0;
@@ -2247,6 +2251,15 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 		// Offset = I->getOperand(0);
 		Offset = GI->getOperand(GI->getNumOperands()-1);
 	}
+
+	if(Instruction *I = dyn_cast<Instruction>(GI->getOperand(1))){
+		if(I->getOpcode() == Instruction::Sub){
+			errs()<<" : " <<  *GI << " : " << func_name << " : "<<*GI->getOperand(0) << " : " << *GI->getOperand(1) << "\n" ;
+			isSub = true;
+		}
+
+	}
+
 	Type *type = GI->getSourceElementType(); //get the type of getelementptr
 	if(StructType *t = dyn_cast<StructType>(type))
 	{	//check for struct type
@@ -2338,6 +2351,8 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 			temp= llvm::ConstantInt::get(Type::getInt64Ty(Context), D->getTypeAllocSize(type));
 			IRBuilder<> builder(GI);
 			Offset = builder.CreateBinOp(Instruction::Mul,Offset, temp, "tmp");
+
+			errs()<<isNeg << " : " << "HEREJJJJJJJJJJJ\n";
 		}
 		else
 			offset+=c*D->getTypeAllocSize(type);
@@ -2350,10 +2365,38 @@ void resolveGetElementPtr(GetElementPtrInst *GI,DataLayout *D,LLVMContext &Conte
 	Instruction *op = dyn_cast<Instruction>(GI);
 	BinaryOperator *binop;
 	ZExtInst *zext_binop = new ZExtInst(Offset, Type::getInt128Ty(Context), "zextarrayidx", op);
-	if(isNeg){
-		//offset = offset*-1;
+	ZExtInst *zext32_binop;
+	TruncInst* trunc_ptr;
+	BinaryOperator* trunc_ptr_sub;
+	Value* minus_one;
+	SExtInst *ptr_mask;
+	BinaryOperator *zero_ptr; 
+	ZExtInst *result_binop;
+
+	if(isSub){
+
+		zext32_binop = new ZExtInst(Offset, Type::getInt64Ty(Context), "zextarrayidx_2", op);
+		trunc_ptr = new TruncInst(GI->getOperand(0), Type::getInt64Ty(Context),"trunc_ptr", op);
+		trunc_ptr_sub = BinaryOperator::Create(Instruction::Add, trunc_ptr, zext32_binop , "arrayidx", op);
+
+		minus_one = llvm::ConstantInt::get(Type::getInt64Ty(Context),0xffffffff00000000, op);
+		ptr_mask =  new SExtInst(minus_one, Type::getInt128Ty(Context), "zero_ptr", op);
+		
+		zero_ptr =  BinaryOperator::Create(Instruction::And, GI->getOperand(0), ptr_mask , "zero_ptr", op);
+		
+		result_binop = new ZExtInst(trunc_ptr_sub, Type::getInt128Ty(Context), "result_ptr", op);
+		// binop =  BinaryOperator::Create(Instruction::Add, zero_ptr, result_binop , "arrayidx", op);
+		binop =  BinaryOperator::Create(Instruction::Add, zero_ptr, result_binop , "arrayidx", op);
+
+		errs() << "Here\n"<<*result_binop << "\n";
+   	
+	}
+
+	else if(isNeg){
+		// offset = offset*-1;
 		binop =  BinaryOperator::Create(Instruction::Sub, GI->getOperand(0), zext_binop , "arrayidx", op);
-	}else{
+	}
+	else{
 		binop =  BinaryOperator::Create(Instruction::Add, GI->getOperand(0), zext_binop , "arrayidx", op);
 	}
 	op->replaceAllUsesWith(binop);
