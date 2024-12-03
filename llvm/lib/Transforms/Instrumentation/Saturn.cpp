@@ -31,6 +31,81 @@ static cl::opt<bool>
     EnableStripAddressCompatibility("enable-strip-trusted-code",
                  cl::desc("Enable stripping even in trusted code for compatibility"), cl::init(false), cl::Hidden);
 
+static cl::opt<std::string> capFilePath(
+    "cap-file-path",
+    cl::desc("Path where function-compartment mapping (.cap) file is present."),
+    cl::Hidden);
+
+static cl::opt<int> defaultCompartment(
+    "default-compartment-id",
+    cl::desc("Default compartment id. Alternate way to set this, is \":<default_compartment_id>\" at the start of the .cap file."),
+    cl::init(266), // currently 0-255 valid compartment range
+    cl::Hidden);
+
+static cl::opt<bool> allEntry(
+    "all-entry",
+    cl::desc("Instrument every function as valid entry point"),
+    cl::init(false),
+    cl::Hidden);
+
+std::map <std::string, int> compartment_function_map;
+std::map <std::string, int> checkcap_function_map;
+
+// Replace '/' with "__"
+std::string sanitize(std::string name, char ch){
+  std::string new_name = "";
+  for (std::string::size_type i = 0; i < name.size(); i++) {
+    if(name[i] == ch){
+      new_name.append(2, '_');
+    }
+    else{
+      new_name.append(1, name[i]);
+    }
+  }
+ return new_name;
+}
+
+void initialize_compartment_map(std::string source_filename_with_ext){
+  if (!CapFilePath.empty()) {
+    errs()<<CapFilePath<<"\n";
+    std::string cap_filename(CapFilePath);
+    cap_filename.append("/");
+    std::string source_filename = source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of("."));
+    cap_filename.append(source_filename);
+    errs()<<"\n source_filename: "<<source_filename<<"\n";
+    cap_filename.append(".cap");
+    std::ifstream CapFile;
+    errs()<<"\nCap filename:"<<cap_filename;
+    CapFile.open(cap_filename);
+    std::string myText;
+    bool default_set = 0;
+    // Use a while loop together with the getline() function to read the file line by line
+    if(CapFile){
+      errs()<<"PAssed\n";
+      while (getline (CapFile, myText)) {
+        if(default_set == 0){
+          std::size_t pos = myText.find_last_of(":");
+          if(pos == 0){
+            default_compartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
+            // default_compartment = std::stoi(myText);
+         }
+         default_set = 1;
+        }
+        else{
+          int checkcap_enable = std::stoi(myText.substr(myText.find_last_of(":")+1));
+          std::string func_name_id_str = myText.substr(0, myText.find_last_of(":"));
+          std::string function_name = func_name_id_str.substr(0, func_name_id_str.find_last_of(":"));
+          int compartment_id = std::stoi(func_name_id_str.substr(func_name_id_str.find_last_of(":")+1));
+          compartment_function_map.insert(std::pair<std::string, int>(function_name, compartment_id));
+          if(checkcap_enable){
+            checkcap_function_map.insert(std::pair<std::string, int>(function_name, 1));
+          }
+        }
+      }
+    }
+    CapFile.close();
+  }
+}
 
 
 /*
@@ -205,7 +280,37 @@ namespace {
     				}
     			}
     		}	
-    		
+
+
+
+    		/* Setting code compartment metadata */
+    		std::string source_filename_with_ext((MF.getFunction()).getParent()->getSourceFileName());
+			std::string source_filename((MF.getFunction()).getParent()->getSourceFileName());
+			initialize_compartment_map(sanitize(source_filename_with_ext, '/'));
+
+			for (auto &F : M){
+				int compartment_id = default_compartment;
+			   	bool checkcap_insert = false;
+			  	std::map <std::string, int>::iterator it;
+			  	it  = compartment_function_map.find(functionName);
+			  	if(it != compartment_function_map.end()){
+			    	compartment_id = compartment_function_map.at(functionName);
+			  	}
+
+	 			it  = checkcap_function_map.find(functionName);
+			  	if(it != checkcap_function_map.end()){
+			    	checkcap_insert = true;
+			  	}
+				std::string ts = ".text.c.";
+			  	ts.append(std::to_string(compartment_id));
+			  	F.setSection(StringRef(ts));
+			 	
+			  	if(checkcap_insert || allEntry){
+			    	Constant* compartmentPrefix = ConstantInt::get(Int64Ty, compartment_id, false);
+			    	F.setPrefixData(compartmentPrefix);
+			  	}
+			}
+
     		modified =  true
 			return modified;
 		}
