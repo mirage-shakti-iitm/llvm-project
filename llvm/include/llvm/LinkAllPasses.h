@@ -56,6 +56,8 @@
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 #include "llvm/Transforms/Vectorize.h"
 #include "llvm/Transforms/ShaktiMS.h"
+#include "llvm/Transforms/Saturn.h"
+
 #include <cstdlib>
 
 namespace {
@@ -248,6 +250,7 @@ namespace {
       (void) llvm::sys::RunningOnValgrind();
 
       (void) llvm::createShaktiMSPass();
+      (void) llvm::createSaturnPass();
     }
   } ForcePassLinking; // Force link by creating a global definition.
 }

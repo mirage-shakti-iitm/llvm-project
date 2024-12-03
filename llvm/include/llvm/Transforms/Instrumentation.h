@@ -76,6 +76,10 @@ struct GCOVOptions {
 // ShaktiMSPass
 ModulePass *createShaktiMSPass();
 
+// SaturnPass
+ModulePass *createSaturnPass();
+
+
 ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
                                    GCOVOptions::getDefault());
 

@@ -14,6 +14,9 @@
 #include <stack>
 #include <map>
 #include <set>
+#include <fstream>
+#include <cstdlib>
+#include <string>
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -22,6 +25,11 @@
 
 
 using namespace llvm;
+
+static cl::opt<std::string> CapFilePath(
+    "cap-file-path",
+    cl::desc("Path where function-compartment mapping (.cap) file is present."),
+    cl::Hidden);
 
 static cl::opt<bool>
     EnableBoundsCheck("enable-bounds-check",
@@ -86,8 +94,8 @@ void initialize_compartment_map(std::string source_filename_with_ext){
         if(default_set == 0){
           std::size_t pos = myText.find_last_of(":");
           if(pos == 0){
-            default_compartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
-            // default_compartment = std::stoi(myText);
+            defaultCompartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
+            
          }
          default_set = 1;
         }
@@ -126,30 +134,29 @@ loadPtr = strippedPtr || maskedDiff
 
 Value *stripCheckPointer(Instruction *I, Value *pointeroperand, Value *boundsTableAddr, LLVMContext &Ctx){
  	IRBuilder<> Builder(I);
-	LLVM_DBG(dbgs() << "Strip with po " << *pointeroperand << "used in " << *I
-                  << "\n");
+	// LLVM_DBG(dbgs() << "Strip with po " << *pointeroperand << "used in " << *I << "\n");
 	auto poType = pointeroperand->getType();
 
 	/* Mask upper 32 bits, assuming 4GB memory space */
 	/* TODO: Can be made configurable at compile time, increased in powers of 2. Tradeoff between memory space and number of objects. supported */
-	llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Int64Ty, 0x00000000FFFFFFFFULL, false);
-	llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Int64Ty, 0xFFFFFFFF00000000ULL, false);
+	llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x00000000FFFFFFFFULL, false);
+	llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0xFFFFFFFF00000000ULL, false);
 
-	auto boundsTableIndex = Builder.CreateLShr(po,32,"boundsTableIndex")
-	auto boundsTableOffset = Builder.CreateShl(index, 3, "boundsTableOffset")
-	auto metadataAddrInt = Builder.CreateAdd(boundsTableAddr, index, "metadataAddrInt")
-	auto metadataAddr = Builder.CreateIntToPtr(metadataAddrInt,Type::getInt32PtrTy(Ctx),"metadataAddr")
-	auto metadata = Builder.CreateLoad(Int64Ty, metadataAddr,"metadata")
+	Value* boundsTableIndex = Builder.CreateLShr(pointeroperand,32,"boundsTableIndex");
+	auto boundsTableOffset = Builder.CreateShl(boundsTableIndex, 3, "boundsTableOffset");
+	auto metadataAddrInt = Builder.CreateAdd(boundsTableAddr, boundsTableOffset, "metadataAddrInt");
+	auto metadataAddr = Builder.CreateIntToPtr(metadataAddrInt,Type::getInt32PtrTy(Ctx),"metadataAddr");
+	auto metadata = Builder.CreateLoad(Type::getInt64Ty(Ctx), metadataAddr,"metadata");
 
- 	auto addressInt = Builder.CreatePtrToInt(pointeroperand, Int64Ty, "addressInt");
- 	auto strippedAddress = Builder.CreateAnd(addressInt, StripMask, "strippedAddress");
+ 	auto addressInt = Builder.CreatePtrToInt(pointeroperand, Type::getInt64Ty(Ctx), "addressInt");
+ 	auto strippedAddress = Builder.CreateAnd(addressInt, stripUpperMask, "strippedAddress");
 
 	auto base = Builder.CreateAnd(metadata, stripUpperMask, "base");
 	auto bound = Builder.CreateLShr(metadata,32,"bound");
 	auto baseDiff = Builder.CreateSub(strippedAddress, base, "baseDiff");
 	auto boundDiff = Builder.CreateSub(bound, strippedAddress, "boundDiff");
 	auto resultDiff = Builder.CreateOr(baseDiff, boundDiff,"resultDiff");
-	auto resultMask = Builder.CreateAnd(metadata, StripLowerMask, "resultMask");
+	auto resultMask = Builder.CreateAnd(metadata, stripLowerMask, "resultMask");
 	auto resultAddressInt = Builder.CreateOr(strippedAddress, resultMask, "resultPtrInt");
 
 	auto resultAddress = Builder.CreateIntToPtr(resultAddressInt, poType, "resultAddr");
@@ -159,19 +166,18 @@ Value *stripCheckPointer(Instruction *I, Value *pointeroperand, Value *boundsTab
 }
 
 
-Value *stripCheckPointer(Instruction *I, Value *pointeroperand, LLVMContext &Ctx){
+Value *stripPointer(Instruction *I, Value *pointeroperand, LLVMContext &Ctx){
  	IRBuilder<> Builder(I);
-	LLVM_DBG(dbgs() << "Strip with po " << *pointeroperand << "used in " << *I
-                  << "\n");
+	// LLVM_DBG(dbgs() << "Strip with po " << *pointeroperand << "used in " << *I << "\n");
 	auto poType = pointeroperand->getType();
 
 	/* Mask upper 32 bits, assuming 4GB memory space */
 	/* TODO: Can be made configurable at compile time, increased in powers of 2. Tradeoff between memory space and number of objects. supported */
-	llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Int64Ty, 0x00000000FFFFFFFFULL, false);
-	llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Int64Ty, 0xFFFFFFFF00000000ULL, false);
+	llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x00000000FFFFFFFFULL, false);
+	llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0xFFFFFFFF00000000ULL, false);
 
- 	auto addressInt = Builder.CreatePtrToInt(pointeroperand, Int64Ty, "addressInt");
- 	auto strippedAddress = Builder.CreateAnd(addressInt, StripMask, "strippedAddress");
+ 	auto addressInt = Builder.CreatePtrToInt(pointeroperand, Type::getInt64Ty(Ctx), "addressInt");
+ 	auto strippedAddress = Builder.CreateAnd(addressInt, stripUpperMask, "strippedAddress");
 	auto resultAddress = Builder.CreateIntToPtr(strippedAddress, poType, "resultAddr");
 
  	return resultAddress;
@@ -182,7 +188,7 @@ namespace {
 	struct SaturnPass : public ModulePass
 	{
 		static char ID;
-		SaturnPass() : ModulePass(ID) {initializeSaturnPassPass(*PassRegistry::getPassRegistry());}
+		SaturnPass() : ModulePass(ID) {initializeSaturnPass(*PassRegistry::getPassRegistry());}
 
 		std::map <StructType*, StructType*> rep_structs;
 
@@ -216,14 +222,14 @@ namespace {
 	 			auto free_names = {"free", "_ZdaPv", "_ZdlPv", "_ZdaPvRKSt9nothrow_t",
 	                     "_ZdlPvRKSt9nothrow_t"};
 
-	            SaturnMallocFn = M.getOrInsertFunction("__saturn_malloc", FunctionType::get(PtrTy, {Int64Ty}, false));
-	            SaturnFreeFn = M.getOrInsertFunction("__saturn_free", FunctionType::get(VoidTy, {PtrTy}, false));
+	            auto SaturnMallocFn = M.getOrInsertFunction("__saturn_malloc", FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false));
+	            auto SaturnFreeFn = M.getOrInsertFunction("__saturn_free", FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false));
 
 	            for (auto name : malloc_names) {
-	    			M.getOrInsertFunction(name, FunctionType::get(PtrTy, {Int64Ty}, false)).getCallee()->replaceAllUsesWith(SaturnMallocFn.getCallee());
+	    			M.getOrInsertFunction(name, FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false)).getCallee()->replaceAllUsesWith(SaturnMallocFn.getCallee());
 	    		}
 	    		for (auto name : free_names) {
-	    			M.getOrInsertFunction(name, FunctionType::get(VoidTy, {PtrTy}, false)).getCallee()->replaceAllUsesWith(SaturnFreeFn.getCallee());
+	    			M.getOrInsertFunction(name, FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false)).getCallee()->replaceAllUsesWith(SaturnFreeFn.getCallee());
 	    		}
 			}
 
@@ -234,9 +240,9 @@ namespace {
 			/* Declare global variable which stores the bounds metadata table */
     		std::string boundsTableStr = "_saturn_bounds_table";
     		StringRef boundsTable = StringRef(boundsTableStr);
-    		GlobalVariable* boundsTableGV = M.getOrInsertGlobal(boundsTable,arg0Type);
+    		GlobalVariable* boundsTableGV = M.getOrInsertGlobal(boundsTable,Type::getInt64Ty(Ctx));
 
-    		Value *boundsTableAddr = M.getOrInsertGlobal(startName, Type::getInt64Ty(Ctx));
+    		Value *boundsTableAddr = M.getOrInsertGlobal(boundsTable, Type::getInt64Ty(Ctx));
 
     		//  I->getModule()->getNamedGlobal(Name);
     		// if (key) {
@@ -254,7 +260,7 @@ namespace {
 					for (auto &I : B)
 					{
 						// If instruction is load instruction apply bounds check
-						if (LoadInst *LI = dyn_cast<CallInst>(&I)){
+						if (LoadInst *LI = dyn_cast<LoadInst>(&I)){
 							Value *po = LI->getPointerOperand();
 							
 							if(EnableBoundsCheck){
@@ -266,7 +272,7 @@ namespace {
 								LI->setOperand(0, V);
 							}
 						}
-						if (StoreInst *SI = dyn_cast<CallInst>(&I)){
+						if (StoreInst *SI = dyn_cast<StoreInst>(&I)){
 							Value *po = SI->getPointerOperand();
 							if(EnableBoundsCheck){
 								Value *V = stripCheckPointer(SI, po, boundsTableAddr, Ctx);
@@ -284,14 +290,15 @@ namespace {
 
 
     		/* Setting code compartment metadata */
-    		std::string source_filename_with_ext((MF.getFunction()).getParent()->getSourceFileName());
-			std::string source_filename((MF.getFunction()).getParent()->getSourceFileName());
+    		std::string source_filename_with_ext(M.getSourceFileName());
+			std::string source_filename(M.getSourceFileName());
 			initialize_compartment_map(sanitize(source_filename_with_ext, '/'));
 
 			for (auto &F : M){
-				int compartment_id = default_compartment;
+				int compartment_id = defaultCompartment;
 			   	bool checkcap_insert = false;
 			  	std::map <std::string, int>::iterator it;
+			  	auto functionName = F.getName().str();
 			  	it  = compartment_function_map.find(functionName);
 			  	if(it != compartment_function_map.end()){
 			    	compartment_id = compartment_function_map.at(functionName);
@@ -306,12 +313,12 @@ namespace {
 			  	F.setSection(StringRef(ts));
 			 	
 			  	if(checkcap_insert || allEntry){
-			    	Constant* compartmentPrefix = ConstantInt::get(Int64Ty, compartment_id, false);
+			    	Constant* compartmentPrefix = ConstantInt::get(Type::getInt64Ty(Ctx), compartment_id, false);
 			    	F.setPrefixData(compartmentPrefix);
 			  	}
 			}
 
-    		modified =  true
+    		// modified =  true
 			return modified;
 		}
 	};

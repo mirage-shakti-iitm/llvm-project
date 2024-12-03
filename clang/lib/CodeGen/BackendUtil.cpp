@@ -872,11 +872,18 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   if (TM)
     TheModule->setDataLayout(TM->createDataLayout());
 
+  legacy::PassManager SaturnModulePass;
+  SaturnModulePass.add(
+      createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
+  SaturnModulePass.add(createSaturnPass());
+
   legacy::PassManager SMSModulePass;
   SMSModulePass.add(
       createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
   SMSModulePass.add(createShaktiMSPass());
   
+
+
 
   legacy::PassManager PerModulePasses;
   PerModulePasses.add(
@@ -955,6 +962,12 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
     PrettyStackTraceString CrashInfo("SMS pass");
     llvm::TimeTraceScope TimeScope("SMSModulePass");
     SMSModulePass.run(*TheModule);
+  }
+
+  {
+    PrettyStackTraceString CrashInfo("Saturn pass");
+    llvm::TimeTraceScope TimeScope("SaturnModulePass");
+    SaturnModulePass.run(*TheModule);
   }
 
   {
