@@ -443,7 +443,7 @@ void initializeXRayInstrumentationPass(PassRegistry&);
 
 void initializeshaktiPassPass(PassRegistry &);
 
-void initializeSaturnPass(PassRegistry &);
+void initializeSaturnPassPass(PassRegistry &);
 
 } // end namespace llvm
 

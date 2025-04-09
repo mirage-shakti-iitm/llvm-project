@@ -26,8 +26,8 @@
 
 using namespace llvm;
 
-static cl::opt<std::string> CapFilePath(
-    "cap-file-path",
+static cl::opt<std::string> CapFile(
+    "cap-file",
     cl::desc("Path where function-compartment mapping (.cap) file is present."),
     cl::Hidden);
 
@@ -39,25 +39,20 @@ static cl::opt<bool>
     EnableStripAddressCompatibility("enable-strip-trusted-code",
                  cl::desc("Enable stripping even in trusted code for compatibility"), cl::init(false), cl::Hidden);
 
-static cl::opt<std::string> capFilePath(
-    "cap-file-path",
-    cl::desc("Path where function-compartment mapping (.cap) file is present."),
-    cl::Hidden);
-
-static cl::opt<int> defaultCompartment(
-    "default-compartment-id",
+static cl::opt<int> DefaultCompartment(
+    "default-compartment",
     cl::desc("Default compartment id. Alternate way to set this, is \":<default_compartment_id>\" at the start of the .cap file."),
     cl::init(266), // currently 0-255 valid compartment range
     cl::Hidden);
 
-static cl::opt<bool> allEntry(
+static cl::opt<bool> AllEntry(
     "all-entry",
     cl::desc("Instrument every function as valid entry point"),
     cl::init(false),
     cl::Hidden);
 
-std::map <std::string, int> compartment_function_map;
-std::map <std::string, int> checkcap_function_map;
+std::map <std::string, int> compartment_map;
+std::map <std::string, int> checkcap_map;
 
 // Replace '/' with "__"
 std::string sanitize(std::string name, char ch){
@@ -74,9 +69,9 @@ std::string sanitize(std::string name, char ch){
 }
 
 void initialize_compartment_map(std::string source_filename_with_ext){
-  if (!CapFilePath.empty()) {
-    errs()<<CapFilePath<<"\n";
-    std::string cap_filename(CapFilePath);
+  if (!CapFile.empty()) {
+    errs()<<CapFile<<"\n";
+    std::string cap_filename(CapFile);
     cap_filename.append("/");
     std::string source_filename = source_filename_with_ext.substr(0, source_filename_with_ext.find_last_of("."));
     cap_filename.append(source_filename);
@@ -94,7 +89,7 @@ void initialize_compartment_map(std::string source_filename_with_ext){
         if(default_set == 0){
           std::size_t pos = myText.find_last_of(":");
           if(pos == 0){
-            defaultCompartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
+            DefaultCompartment = std::stoi(myText.substr(myText.find_last_of(":")+1));
             
          }
          default_set = 1;
@@ -104,9 +99,9 @@ void initialize_compartment_map(std::string source_filename_with_ext){
           std::string func_name_id_str = myText.substr(0, myText.find_last_of(":"));
           std::string function_name = func_name_id_str.substr(0, func_name_id_str.find_last_of(":"));
           int compartment_id = std::stoi(func_name_id_str.substr(func_name_id_str.find_last_of(":")+1));
-          compartment_function_map.insert(std::pair<std::string, int>(function_name, compartment_id));
+          compartment_map.insert(std::pair<std::string, int>(function_name, compartment_id));
           if(checkcap_enable){
-            checkcap_function_map.insert(std::pair<std::string, int>(function_name, 1));
+            checkcap_map.insert(std::pair<std::string, int>(function_name, 1));
           }
         }
       }
@@ -188,7 +183,7 @@ namespace {
 	struct SaturnPass : public ModulePass
 	{
 		static char ID;
-		SaturnPass() : ModulePass(ID) {initializeSaturnPass(*PassRegistry::getPassRegistry());}
+		SaturnPass() : ModulePass(ID) {initializeSaturnPassPass(*PassRegistry::getPassRegistry());}
 
 		std::map <StructType*, StructType*> rep_structs;
 
@@ -215,6 +210,8 @@ namespace {
 				return modified	;
 			}
 
+			auto &Ctx = M.getContext();
+
 			if(EnableBoundsCheck){
 				/* Replace allocator functions with safe variant */
 				auto malloc_names = {"malloc", "_Znam", "_Znwm", "_ZnamRKSt9nothrow_t",
@@ -238,9 +235,9 @@ namespace {
 
 
 			/* Declare global variable which stores the bounds metadata table */
-    		std::string boundsTableStr = "_saturn_bounds_table";
+    		std::string boundsTableStr = "_saturn_bounds_table_ptr";
     		StringRef boundsTable = StringRef(boundsTableStr);
-    		GlobalVariable* boundsTableGV = M.getOrInsertGlobal(boundsTable,Type::getInt64Ty(Ctx));
+    		// auto boundsTableGV = M.getOrInsertGlobal(boundsTable,Type::getInt64Ty(Ctx));
 
     		Value *boundsTableAddr = M.getOrInsertGlobal(boundsTable, Type::getInt64Ty(Ctx));
 
@@ -295,24 +292,24 @@ namespace {
 			initialize_compartment_map(sanitize(source_filename_with_ext, '/'));
 
 			for (auto &F : M){
-				int compartment_id = defaultCompartment;
+				int compartment_id = DefaultCompartment;
 			   	bool checkcap_insert = false;
 			  	std::map <std::string, int>::iterator it;
 			  	auto functionName = F.getName().str();
-			  	it  = compartment_function_map.find(functionName);
-			  	if(it != compartment_function_map.end()){
-			    	compartment_id = compartment_function_map.at(functionName);
+			  	it  = compartment_map.find(functionName);
+			  	if(it != compartment_map.end()){
+			    	compartment_id = compartment_map.at(functionName);
 			  	}
 
-	 			it  = checkcap_function_map.find(functionName);
-			  	if(it != checkcap_function_map.end()){
+	 			it  = checkcap_map.find(functionName);
+			  	if(it != checkcap_map.end()){
 			    	checkcap_insert = true;
 			  	}
 				std::string ts = ".text.c.";
 			  	ts.append(std::to_string(compartment_id));
 			  	F.setSection(StringRef(ts));
 			 	
-			  	if(checkcap_insert || allEntry){
+			  	if(checkcap_insert || AllEntry){
 			    	Constant* compartmentPrefix = ConstantInt::get(Type::getInt64Ty(Ctx), compartment_id, false);
 			    	F.setPrefixData(compartmentPrefix);
 			  	}
