@@ -877,6 +877,11 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
       createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
   SaturnModulePass.add(createSaturnPass());
 
+  legacy::PassManager FidesModulePass;
+  FidesModulePass.add(
+      createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
+  FidesModulePass.add(createFidesPass());
+
   legacy::PassManager SMSModulePass;
   SMSModulePass.add(
       createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
@@ -968,6 +973,12 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
     PrettyStackTraceString CrashInfo("Saturn pass");
     llvm::TimeTraceScope TimeScope("SaturnModulePass");
     SaturnModulePass.run(*TheModule);
+  }
+
+  {
+    PrettyStackTraceString CrashInfo("Fides pass");
+    llvm::TimeTraceScope TimeScope("FidesModulePass");
+    FidesModulePass.run(*TheModule);
   }
 
   {

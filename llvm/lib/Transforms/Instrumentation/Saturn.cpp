@@ -74,7 +74,7 @@ namespace {
 
 		virtual bool runOnModule(Module &M)
 		{	return 0;
-
+	}
 	};
 }
 

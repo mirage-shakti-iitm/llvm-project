@@ -32,7 +32,7 @@ static cl::opt<std::string> CapFile(
     cl::Hidden);
 
 static cl::opt<bool>
-    EnableBoundsCheck("enable-bounds-check",
+    EnableBoundsCheck("enable-bssounds-check",
                  cl::desc("Enable S/W bounds checking"), cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
@@ -134,10 +134,12 @@ namespace {
 		static char ID;
 		FidesPass() : ModulePass(ID) {initializeFidesPassPass(*PassRegistry::getPassRegistry());}
 
-		std::map <StructType*, StructType*> rep_structs;
+		
 
 		virtual bool runOnModule(Module &M)
 		{	
+
+			errs()<<"Welcome\n";
 
 			bool moduleHasFunctions = false;
 
@@ -200,7 +202,7 @@ namespace {
     		
 
     		for (auto &F : M){
-    			
+    			errs()<<"HI SAI 1\n";
     			Module *m = F.getParent();
     			Function *val = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
 
@@ -209,11 +211,14 @@ namespace {
 						// Iterate over Instrs in BB
 						for (auto &I : B)
 						{
+							errs()<<"HI SAI 21: "<<I<<"\n";
+							
 							// If instruction is load instruction apply bounds check
 							if (LoadInst *LI = dyn_cast<LoadInst>(&I)){
 								Value *po = LI->getPointerOperand();
-								
+								errs()<<"HI SAI 12\n";
 								if(EnableBoundsCheck){
+									errs()<<"HI SAI 2\n";
 									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
 									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
 
@@ -278,7 +283,7 @@ namespace {
 			}
 
     		// modified =  true
-			return modified;
+			return true;
 		}
 	};
 }
@@ -299,6 +304,7 @@ INITIALIZE_PASS_END(FidesPass,
 
 namespace llvm {
 	ModulePass *createFidesPass() {
+			errs()<<"HI\n";
   		return new FidesPass();
 	}
 } // namespace llvm
