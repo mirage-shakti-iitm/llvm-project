@@ -57,6 +57,7 @@
 #include "llvm/Transforms/Vectorize.h"
 #include "llvm/Transforms/ShaktiMS.h"
 #include "llvm/Transforms/Saturn.h"
+#include "llvm/Transforms/Fides.h"
 
 #include <cstdlib>
 
@@ -251,6 +252,7 @@ namespace {
 
       (void) llvm::createShaktiMSPass();
       (void) llvm::createSaturnPass();
+      (void) llvm::createFidesPass();
     }
   } ForcePassLinking; // Force link by creating a global definition.
 }

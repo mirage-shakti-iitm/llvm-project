@@ -445,6 +445,8 @@ void initializeshaktiPassPass(PassRegistry &);
 
 void initializeSaturnPassPass(PassRegistry &);
 
+void initializeFidesPassPass(PassRegistry &);
+
 } // end namespace llvm
 
 #endif // LLVM_INITIALIZEPASSES_H

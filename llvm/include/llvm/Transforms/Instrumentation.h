@@ -79,6 +79,9 @@ ModulePass *createShaktiMSPass();
 // SaturnPass
 ModulePass *createSaturnPass();
 
+// FidesPass
+ModulePass *createFidesPass();
+
 
 ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
                                    GCOVOptions::getDefault());
