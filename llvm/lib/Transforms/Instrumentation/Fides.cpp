@@ -1,3 +1,6 @@
+/* TODO: Should do realloc, calloc any other allocator functions */
+/* TODO: Should do global objects */ 
+
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Pass.h"
@@ -32,7 +35,7 @@ static cl::opt<std::string> CapFile(
     cl::Hidden);
 
 static cl::opt<bool>
-    EnableBoundsCheck("enable-bssounds-check",
+    EnableBoundsCheck("enable-fides-bounds-check",
                  cl::desc("Enable S/W bounds checking"), cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
@@ -178,49 +181,41 @@ namespace {
 	    			M.getOrInsertFunction(name, FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesFreeFn.getCallee());
 	    		}
 			}
-
-
-    		/* TODO: Should do realloc, calloc any other allocator functions */
-
-
-			/* Declare global variable which stores the bounds metadata table */
-    		std::string boundsTableStr = "_fides_bounds_table_ptr";
-    		StringRef boundsTable = StringRef(boundsTableStr);
-    		// auto boundsTableGV = M.getOrInsertGlobal(boundsTable,Type::getInt64Ty(Ctx));
-
-    		Value *boundsTableAddr = M.getOrInsertGlobal(boundsTable, Type::getInt64Ty(Ctx));
-
-    		//  I->getModule()->getNamedGlobal(Name);
-    		// if (key) {
-        	// 	LoadInst* load = Builder.CreateLoad(key);
-
-        	// return load;
-    		// }
-
-			/* Replace load store instructions with bounds check */
-
     		
+    	/* Instrument Load-Store instructions. Don't instrument instructions accessing int/float objects */
+    	for (auto &F : M){
+    		// errs()<<"HI SAI 1\n";
+    		Module *m = F.getParent();
+    		Function *val = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
 
-    		for (auto &F : M){
-    			errs()<<"HI SAI 1\n";
-    			Module *m = F.getParent();
-    			Function *val = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
-
-    			for (auto &B : F)
+    		for (auto &B : F)
+				{
+					// Iterate over Instrs in BB
+					for (auto &I : B)
 					{
-						// Iterate over Instrs in BB
-						for (auto &I : B)
-						{
-							errs()<<"HI SAI 21: "<<I<<"\n";
+							// errs()<<"HI SAI 21: "<<I<<"\n";
 							
 							// If instruction is load instruction apply bounds check
 							if (LoadInst *LI = dyn_cast<LoadInst>(&I)){
 								Value *po = LI->getPointerOperand();
-								errs()<<"HI SAI 12\n";
+								// errs()<<"HI SAI 12\n";
 								if(EnableBoundsCheck){
-									errs()<<"HI SAI 2\n";
-									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
-									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
+									// errs()<<"HI SAI 2\n";
+									
+									bool insert_check = true;
+									if (auto *AI = dyn_cast<AllocaInst>(LI->getPointerOperand())){
+    								Type *pt = LI->getPointerOperandType();
+    								// errs()<<*LI<<" :: "<<*LI->getOperand(0)<<" :: "<<*LI->getPointerOperandType()<<"\n";
+    								if(dyn_cast<PointerType>(pt)){
+											// errs()<<*pt->getPointerElementType()<<"::"<<pt->getPointerElementType()->isArrayTy()<<"::"<<*AI->getAllocatedType()<<"\n";
+											if(!pt->getPointerElementType()->isPointerTy()){
+												insert_check = false;
+											}
+										}	
+    							}
+
+									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
+									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
 
 									std::vector<Value *> args1;
 									std::vector<Value *> args2;
@@ -233,11 +228,51 @@ namespace {
 									ArrayRef<Value *> args_ref1(args1);
 									ArrayRef<Value *> args_ref2(args2);
 
-									// Create call to intrinsic
-									IRBuilder<> Builder(LI);
-									Builder.SetInsertPoint(LI);
-									Builder.CreateCall(val, args_ref1,"");
-									Builder.CreateCall(val, args_ref2,"");
+									if(insert_check){
+										// Create call to intrinsic
+										IRBuilder<> Builder(LI);
+										Builder.SetInsertPoint(LI);
+										Builder.CreateCall(val, args_ref1,"");
+										Builder.CreateCall(val, args_ref2,"");
+									}
+								}
+							}
+							if (StoreInst *SI = dyn_cast<StoreInst>(&I)){
+								Value *po = SI->getPointerOperand();
+								if(EnableBoundsCheck){
+									bool insert_check = true;
+									if (auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand())){
+    								Type *pt = SI->getPointerOperandType();
+    								// errs()<<*SI<<" :: "<<*SI->getOperand(1)<<" :: "<<*SI->getPointerOperandType()<<"\n";
+    								if(dyn_cast<PointerType>(pt)){
+											// errs()<<*pt->getPointerElementType()<<"::"<<pt->getPointerElementType()->isArrayTy()<<"::"<<*AI->getAllocatedType()<<"\n";
+											if(!pt->getPointerElementType()->isPointerTy()){
+												insert_check = false;
+											}
+										}	
+    							}
+
+									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
+									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
+
+									std::vector<Value *> args1;
+									std::vector<Value *> args2;
+									args1.push_back(po);
+									args1.push_back(spatialCheck);
+									
+									args2.push_back(po);
+									args2.push_back(temporalCheck);
+
+									ArrayRef<Value *> args_ref1(args1);
+									ArrayRef<Value *> args_ref2(args2);
+
+									if(insert_check){
+										// Create call to intrinsic
+										IRBuilder<> Builder(SI);
+										Builder.SetInsertPoint(SI);
+										Builder.CreateCall(val, args_ref1,"");
+										Builder.CreateCall(val, args_ref2,"");
+									}
 								}
 							}
 							// if (StoreInst *SI = dyn_cast<StoreInst>(&I)){
@@ -251,8 +286,154 @@ namespace {
     			}
     		}	
 
+    	if(!EnableBoundsCheck){
+    		return 0;
+    	}
+
+    	std::vector<CallInst*> CIToInstrument;
+    	for (auto &F : M){
+    		Module *m = F.getParent();
+    		for (auto &B : F)
+				{
+					// Iterate over Instrs in BB
+					for (auto &I : B)
+					{
+						if(auto *CI = dyn_cast<CallInst>(&I)){
+							if(!(CI->getCalledFunction()->getName().contains("fides") || CI->getCalledFunction()->getName().contains("llvm"))){
+								errs()<<"Insert : "<<*CI<<"\n";
+								CIToInstrument.push_back(CI);
+							}
+						}
+					}
+				}
+			}
+
+			auto FidesStackObjCreate = M.getOrInsertFunction("__fides_stack_metadata_update", FunctionType::get(Type::getInt64Ty(Ctx), {Type::getInt64Ty(Ctx), Type::getInt64Ty(Ctx)}, false));
+			auto FidesMaxStackIdWrite = M.getOrInsertFunction("__fides_max_stack_id_write", FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt64Ty(Ctx)}, false));
+			auto FidesMaxStackIdRead = M.getOrInsertFunction("__fides_max_stack_id_read", FunctionType::get(Type::getInt64Ty(Ctx), {Type::getVoidTy(Ctx)}, false));
+
+			Value *maxStackID = NULL;
+
+    	for (auto &F : M){
+    		Module *m = F.getParent();
+
+    		for (auto &B : F)
+				{
+					// Iterate over Instrs in BB
+					for (auto &I : B)
+					{
+						if(auto *AI = dyn_cast<AllocaInst>(&I)){
+							// errs()<<"\n";
+							int i = 0;
+							if(auto *AI_next = (dyn_cast<AllocaInst>(AI->getNextNode()))){
+								i = 1;
+								// errs()<<*(AI->getNextNode())<<" not last: "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
+							}
+							else{
+								i = 2;
+								IRBuilder<> Builder(AI->getNextNode());
+								// std::vector<Value *> args;
+								// ArrayRef<Value *> args_ref(args);
+								maxStackID = Builder.CreateCall(FidesMaxStackIdRead, {}, "");
+								// errs()<<*(AI->getNextNode())<<"\n last:\n "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
+							}
+						}
+					}
+				}
+			}
+
+    	for (auto &F : M){
+    		Module *m = F.getParent();
+
+    		for (auto &B : F)
+				{
+					// Iterate over Instrs in BB
+					for (auto &I : B)
+					{
+						if(auto *AI = dyn_cast<AllocaInst>(&I)){
+							// Insert metadata if stack object allocated is an Aggregate type(union, struct, array)
+							IRBuilder<> Builder(AI->getNextNode());
+							if(AI->getAllocatedType()->isAggregateType()){
+								
+								std::vector<User*> Users(AI->user_begin(), AI->user_end());
+								
+								auto allocSizeBytes = (AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8;
+								Value* allocSizeLoad = llvm::ConstantInt::get(Type::getInt64Ty(Ctx),allocSizeBytes);
+								Value *stackPointerInt = Builder.CreatePtrToInt(AI, Type::getInt64Ty(Ctx), "");
+
+								std::vector<Value *> args;
+								args.push_back(stackPointerInt);
+								args.push_back(allocSizeLoad);
+
+								ArrayRef<Value *> args_ref(args);
+
+								Value *taggedStackPointerInt = Builder.CreateCall(FidesStackObjCreate, args_ref,"");
+								Value *taggedStackPointer = Builder.CreateIntToPtr(taggedStackPointerInt, AI->getType(), "");
+							
+								// errs()<<*(AI)<<" : "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
+								for (User *U : Users){
+									// errs()<<*U<<" <--> ";
+        					U->replaceUsesOfWith(AI, taggedStackPointer);
+								}
+
+								/* 	TIP: Do not use this AI->replaceAllUsesWith, 
+										because it will replace even where we really need AI to create fat pointer 
+										So the correct way, is to get the Users of that specific instruction in 
+										this case, AI, and store it separately. And use that in replaceAllUsesWith. 
+										Getting the USers list after inserting instructions is also wrong since, 
+										the isnerted instructions also are part of Users then.
+								*/
+
+							}
+							// auto allocSizeBits = AI->getAllocationSizeInBits(m->getDataLayout());
+							// auto allocSizeBytes = allocSizeBits/8;
+							// Function *csrw = Intrinsic::getDeclaration(m, Intrinsic::CSRRW);
+
+						}
+					}
+				}
+			}
+
+			for (auto *CI : CIToInstrument){
+				IRBuilder<> Builder(CI->getNextNode());
+				errs()<<"Insert before : "<<*CI->getNextNode()<<"\n";
+				std::vector<Value *> args_stack_id;
+				args_stack_id.push_back(maxStackID);
+				ArrayRef<Value *> args_ref_stack_id(args_stack_id);
+				Builder.CreateCall(FidesMaxStackIdWrite, args_ref_stack_id,"");
+			}
 
 
+			// for (auto &F : M){
+    	// 	Module *m = F.getParent();
+
+    	// 	for (auto &B : F)
+			// 	{
+			// 		// Iterate over Instrs in BB
+			// 		for (auto &I : B)
+			// 		{
+			// 			if(auto *CI = dyn_cast<CallInst>(&I)){
+			// 				/* 	Update the maxStackId CSR with the value 
+			// 						stored locally in the function prologue 
+			// 						Do this onlfy for non-fides functions. This is sort of an optimization.
+			// 						The fides wrappers are anyway trusted.
+			// 						We can go further and remove the updates for memcpy etc.. but lets not do
+			// 						that now.
+			// 				*/
+			// 				errs()<<CI->getCalledFunction()->getName()<<"\n";
+			// 				if(!(CI->getCalledFunction()->getName().contains("fides") || CI->getCalledFunction()->getName().contains("llvm"))){
+			// 					errs()<<CI->getCalledFunction()->getName()<<" : ss\n\n\n";
+			// 					IRBuilder<> Builder(CI->getNextNode());
+			// 					std::vector<Value *> args_stack_id;
+			// 					args_stack_id.push_back(maxStackID);
+			// 					ArrayRef<Value *> args_ref_stack_id(args_stack_id);
+			// 					Builder.CreateCall(FidesMaxStackIdWrite, args_ref_stack_id,"");
+			// 				}
+			// 				// Builder.CreateCall();
+			// 			}
+			// 		}
+			// 	}
+			// }
     		/* Setting code compartment metadata */
     		std::string source_filename_with_ext(M.getSourceFileName());
 			std::string source_filename(M.getSourceFileName());
@@ -298,6 +479,7 @@ char FidesPass::ID = 0;
 INITIALIZE_PASS_BEGIN(FidesPass,
                       "fides",
                       "Memory safety transforms", false, false)
+INITIALIZE_PASS_DEPENDENCY(ADCELegacyPass)
 INITIALIZE_PASS_END(FidesPass,
                       "fides",
                       "Memory safety transforms", false, false)
