@@ -230,6 +230,13 @@ namespace {
     		}
 			}
     		
+    				/* Declare global variable which stores the bounds metadata table */
+    		std::string boundsTableStr = "__fides_bounds_table";
+    		StringRef boundsTable = StringRef(boundsTableStr);
+    		// auto boundsTableGV = M.getOrInsertGlobal(boundsTable,Type::getInt64Ty(Ctx));
+
+    		Value *boundsTableAddr = M.getOrInsertGlobal(boundsTable, Type::getInt64Ty(Ctx));
+
     	/* Instrument Load-Store instructions. Don't instrument instructions accessing int/float objects */
     	for (auto &F : M){
     		// errs()<<"HI SAI 1\n";
@@ -266,7 +273,7 @@ namespace {
 										}	
     							}
 
-    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x90000000ULL, false);
+    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x90000000ULL, false);
     							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
 									// llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
 									// llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
@@ -285,7 +292,7 @@ namespace {
 									// ArrayRef<Value *> args_ref2(args2);
 
 									args1.push_back(po);
-									args1.push_back(zeroConstant);
+									args1.push_back(boundsTableAddr);
 									ArrayRef<Value *> args_ref1(args1);
 
 									if(insert_check){
@@ -332,7 +339,7 @@ namespace {
 
 									std::vector<Value *> args1;
 									args1.push_back(po);
-									args1.push_back(zeroConstant);
+									args1.push_back(boundsTableAddr);
 
 									ArrayRef<Value *> args_ref1(args1);
 
