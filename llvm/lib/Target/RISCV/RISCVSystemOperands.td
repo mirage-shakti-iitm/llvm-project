@@ -389,4 +389,4 @@ def : SysReg<"parcompcstart", 0x7fa>;
 def : SysReg<"anycompcstart", 0x7fb>;
 def : SysReg<"anycompcend", 0x7fc>;
 def : SysReg<"comepc", 0x7fd>;
-def : SysReg<"fidesmetadatasz", 0x7fe>;
+def : SysReg<"fidesmetadatabase", 0x7fe>;

@@ -1,5 +1,6 @@
 /* TODO: Should do realloc, calloc any other allocator functions */
 /* TODO: Should do global objects */ 
+/* TODO: Should do other allocator functions like calloc, reallocarray, memalign etc...  */
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Instructions.h"
@@ -137,12 +138,55 @@ namespace {
 		static char ID;
 		FidesPass() : ModulePass(ID) {initializeFidesPassPass(*PassRegistry::getPassRegistry());}
 
-		
+// Helper function to check if function has specific annotation
+        bool hasAnnotation(Function &F, StringRef annotationStr) {
+            Module *M = F.getParent();
+            GlobalVariable *annotations = M->getGlobalVariable("llvm.global.annotations");
+            
+            if (!annotations)
+                return false;
+
+            ConstantArray *CA = dyn_cast<ConstantArray>(annotations->getOperand(0));
+            if (!CA)
+                return false;
+
+            for (unsigned i = 0; i < CA->getNumOperands(); i++) {
+                ConstantStruct *CS = dyn_cast<ConstantStruct>(CA->getOperand(i));
+                if (!CS)
+                    continue;
+
+                // First operand is the annotated value
+                Value *annotatedValue = CS->getOperand(0)->stripPointerCasts();
+                if (annotatedValue != &F)
+                    continue;
+
+                // Second operand is the annotation string
+                GlobalVariable *annotationGV = 
+                    dyn_cast<GlobalVariable>(CS->getOperand(1)->stripPointerCasts());
+                if (!annotationGV)
+                    continue;
+
+                ConstantDataSequential *annotationData = 
+                    dyn_cast<ConstantDataSequential>(annotationGV->getInitializer());
+                if (!annotationData)
+                    continue;
+
+                StringRef annotation = annotationData->getAsCString();
+                if (annotation == annotationStr)
+                    return true;
+            }
+            return false;
+        }
+
 
 		virtual bool runOnModule(Module &M)
 		{	
 
-			errs()<<"Welcome\n";
+			if(!EnableBoundsCheck){
+				return true;
+			}
+
+			errs()<<"Welcome to FIDES PASS\n";
 
 			bool moduleHasFunctions = false;
 
@@ -170,23 +214,34 @@ namespace {
 	                       "_ZnwmRKSt9nothrow_t"};
 	 			auto free_names = {"free", "_ZdaPv", "_ZdlPv", "_ZdaPvRKSt9nothrow_t",
 	                     "_ZdlPvRKSt9nothrow_t"};
+	      auto realloc_names = {"realloc"};
 
-	            auto FidesMallocFn = M.getOrInsertFunction("__fides_malloc", FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false));
-	            auto FidesFreeFn = M.getOrInsertFunction("__fides_free", FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false));
-
-	            for (auto name : malloc_names) {
-	    			M.getOrInsertFunction(name, FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesMallocFn.getCallee());
-	    		}
-	    		for (auto name : free_names) {
-	    			M.getOrInsertFunction(name, FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesFreeFn.getCallee());
-	    		}
+   			auto FidesReallocFn = M.getOrInsertFunction("__fides_realloc", FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt8PtrTy(Ctx), Type::getInt64Ty(Ctx)}, false)); 
+        auto FidesMallocFn = M.getOrInsertFunction("__fides_malloc", FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false));
+        auto FidesFreeFn = M.getOrInsertFunction("__fides_free", FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false));
+        for (auto name : malloc_names) {
+    			M.getOrInsertFunction(name, FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt64Ty(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesMallocFn.getCallee());
+    		}
+    		for (auto name : free_names) {
+    			M.getOrInsertFunction(name, FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt8PtrTy(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesFreeFn.getCallee());
+    		}
+    		for (auto name : realloc_names) {
+    			M.getOrInsertFunction(name, FunctionType::get(Type::getInt8PtrTy(Ctx), {Type::getInt8PtrTy(Ctx), Type::getInt64Ty(Ctx)}, false)).getCallee()->replaceAllUsesWith(FidesReallocFn.getCallee());
+    		}
 			}
     		
     	/* Instrument Load-Store instructions. Don't instrument instructions accessing int/float objects */
     	for (auto &F : M){
     		// errs()<<"HI SAI 1\n";
     		Module *m = F.getParent();
-    		Function *val = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
+    		if (hasAnnotation(F, "skip_fides_pass")) {
+    			// skip function processing
+    			continue;
+				}
+    		Function *val_memcheck = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
+
+
+    		errs()<<"Here 1\n";
 
     		for (auto &B : F)
 				{
@@ -198,10 +253,7 @@ namespace {
 							// If instruction is load instruction apply bounds check
 							if (LoadInst *LI = dyn_cast<LoadInst>(&I)){
 								Value *po = LI->getPointerOperand();
-								// errs()<<"HI SAI 12\n";
-								if(EnableBoundsCheck){
-									// errs()<<"HI SAI 2\n";
-									
+								if(EnableBoundsCheck){	
 									bool insert_check = true;
 									if (auto *AI = dyn_cast<AllocaInst>(LI->getPointerOperand())){
     								Type *pt = LI->getPointerOperandType();
@@ -214,26 +266,35 @@ namespace {
 										}	
     							}
 
-									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
-									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
+    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x90000000ULL, false);
+    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
+									// llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
+									// llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
 
+									// std::vector<Value *> args1;
+									// std::vector<Value *> args2;
 									std::vector<Value *> args1;
-									std::vector<Value *> args2;
-									args1.push_back(po);
-									args1.push_back(spatialCheck);
-									
-									args2.push_back(po);
-									args2.push_back(temporalCheck);
 
+									// args1.push_back(po);
+									// args1.push_back(spatialCheck);
+									
+									// args2.push_back(po);
+									// args2.push_back(temporalCheck);
+
+									// ArrayRef<Value *> args_ref1(args1);
+									// ArrayRef<Value *> args_ref2(args2);
+
+									args1.push_back(po);
+									args1.push_back(zeroConstant);
 									ArrayRef<Value *> args_ref1(args1);
-									ArrayRef<Value *> args_ref2(args2);
 
 									if(insert_check){
 										// Create call to intrinsic
 										IRBuilder<> Builder(LI);
 										Builder.SetInsertPoint(LI);
-										Builder.CreateCall(val, args_ref1,"");
-										Builder.CreateCall(val, args_ref2,"");
+										Builder.CreateCall(val_memcheck, args_ref1,"");
+										// Builder.CreateCall(val_memcheck, args_ref1,"");
+										// Builder.CreateCall(val_memcheck, args_ref2,"");
 									}
 								}
 							}
@@ -241,37 +302,47 @@ namespace {
 								Value *po = SI->getPointerOperand();
 								if(EnableBoundsCheck){
 									bool insert_check = true;
-									if (auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand())){
+									// errs()<<"SAI 0"<<SI->getPointerOperand()<<"\n";
+									if(auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand())){
     								Type *pt = SI->getPointerOperandType();
-    								// errs()<<*SI<<" :: "<<*SI->getOperand(1)<<" :: "<<*SI->getPointerOperandType()<<"\n";
+    								// errs()<<"SAI 1 "<<*SI<<" :: "<<*SI->getOperand(1)<<" :: "<<*SI->getPointerOperandType()<<"\n";
     								if(dyn_cast<PointerType>(pt)){
-											// errs()<<*pt->getPointerElementType()<<"::"<<pt->getPointerElementType()->isArrayTy()<<"::"<<*AI->getAllocatedType()<<"\n";
+											// errs()<<"SAI 2 "<<*pt->getPointerElementType()<<"::"<<pt->getPointerElementType()->isArrayTy()<<"::"<<*AI->getAllocatedType()<<"\n";
 											if(!pt->getPointerElementType()->isPointerTy()){
 												insert_check = false;
 											}
 										}	
     							}
 
-									llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
-									llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
+    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x80500000ULL, false);
+    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
+									// llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
+									// llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
+
+									// std::vector<Value *> args1;
+									// std::vector<Value *> args2;
+									// args1.push_back(po);
+									// args1.push_back(spatialCheck);
+									
+									// args2.push_back(po);
+									// args2.push_back(temporalCheck);
+
+									// ArrayRef<Value *> args_ref1(args1);
+									// ArrayRef<Value *> args_ref2(args2);
 
 									std::vector<Value *> args1;
-									std::vector<Value *> args2;
 									args1.push_back(po);
-									args1.push_back(spatialCheck);
-									
-									args2.push_back(po);
-									args2.push_back(temporalCheck);
+									args1.push_back(zeroConstant);
 
 									ArrayRef<Value *> args_ref1(args1);
-									ArrayRef<Value *> args_ref2(args2);
 
 									if(insert_check){
 										// Create call to intrinsic
 										IRBuilder<> Builder(SI);
 										Builder.SetInsertPoint(SI);
-										Builder.CreateCall(val, args_ref1,"");
-										Builder.CreateCall(val, args_ref2,"");
+										Builder.CreateCall(val_memcheck, args_ref1);
+										// Builder.CreateCall(val_memcheck, args_ref1,"");
+										// Builder.CreateCall(val_memcheck, args_ref2,"");
 									}
 								}
 							}
@@ -286,6 +357,8 @@ namespace {
     			}
     		}	
 
+    	errs()<<"Here 2\n";
+
     	if(!EnableBoundsCheck){
     		return 0;
     	}
@@ -293,14 +366,22 @@ namespace {
     	std::vector<CallInst*> CIToInstrument;
     	for (auto &F : M){
     		Module *m = F.getParent();
+    		errs()<<"function name: "<<F.getName()<<" : "<<hasAnnotation(F, "skip_fides_pass")<<"\n";
+    		if (hasAnnotation(F, "skip_fides_pass")) {
+    			// skip function processing
+    			continue;
+				}
+				
     		for (auto &B : F)
 				{
 					// Iterate over Instrs in BB
 					for (auto &I : B)
 					{
 						if(auto *CI = dyn_cast<CallInst>(&I)){
-							if(!(CI->getCalledFunction()->getName().contains("fides") || CI->getCalledFunction()->getName().contains("llvm"))){
+							if(!(CI->getCalledFunction()->getName().contains("fides") || CI->getCalledFunction()->getName().contains("llvm") || 
+								CI->getCalledFunction()->getName().contains("memcpy"))){
 								errs()<<"Insert : "<<*CI<<"\n";
+								errs()<<CI->getCalledFunction()->getName()<<"\n";
 								CIToInstrument.push_back(CI);
 							}
 						}
@@ -316,7 +397,10 @@ namespace {
 
     	for (auto &F : M){
     		Module *m = F.getParent();
-
+    		if (hasAnnotation(F, "skip_fides_pass")) {
+    			// skip function processing
+    			continue;
+				}
     		for (auto &B : F)
 				{
 					// Iterate over Instrs in BB
@@ -344,7 +428,10 @@ namespace {
 
     	for (auto &F : M){
     		Module *m = F.getParent();
-
+    		if (hasAnnotation(F, "skip_fides_pass")) {
+    			// skip function processing
+    			continue;
+				}
     		for (auto &B : F)
 				{
 					// Iterate over Instrs in BB
@@ -396,12 +483,16 @@ namespace {
 
 			for (auto *CI : CIToInstrument){
 				IRBuilder<> Builder(CI->getNextNode());
-				errs()<<"Insert before : "<<*CI->getNextNode()<<"\n";
+				errs()<<"Insert before : "<<*CI<<" : "<<*CI->getNextNode()<<"\n";
 				std::vector<Value *> args_stack_id;
 				args_stack_id.push_back(maxStackID);
 				ArrayRef<Value *> args_ref_stack_id(args_stack_id);
 				Builder.CreateCall(FidesMaxStackIdWrite, args_ref_stack_id,"");
 			}
+
+			// for (int i =0; i<low_contours; i++){
+			// 	i =
+			// }
 
 
 			// for (auto &F : M){
