@@ -21,6 +21,12 @@
 #include <fstream>
 #include <cstdlib>
 #include <string>
+#include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/ADT/DenseMap.h"
+
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -29,6 +35,13 @@
 
 
 using namespace llvm;
+
+#define DEBUG_PRINT(msg) \
+    do { \
+        auto now = std::chrono::steady_clock::now().time_since_epoch(); \
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count(); \
+        errs() << "[" << ms << " ms] " << msg << "\n"; \
+    } while(0)
 
 static cl::opt<std::string> CapFile(
     "cap-file",
@@ -136,6 +149,76 @@ namespace {
 	struct FidesPass : public ModulePass
 	{
 		static char ID;
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<PostDominatorTreeWrapperPass>();
+  }
+		DenseMap<Instruction*, Instruction*> FDCEmap;  // target -> dominating check
+    	DominatorTree *DT;
+    	PostDominatorTree *PDT;
+
+// private:
+    void bbDerefCheck(Function *F) {
+        FDCEmap.clear();
+        int nrofloadstores = 0, nrofredundant = 0;
+        
+        for (BasicBlock &BB : *F) {
+            for (Instruction &I : BB) {
+                LoadInst *LI = dyn_cast<LoadInst>(&I);
+                StoreInst *SI = dyn_cast<StoreInst>(&I);
+                if (!LI && !SI) continue;
+                
+                Value *pointer = LI ? LI->getPointerOperand() : SI->getPointerOperand();
+                if (FDCEmap.count(&I)) {
+                    nrofredundant++;
+                    continue;
+                }
+                
+                nrofloadstores++;
+                findRedundantChecks(&I, pointer, false);
+            }
+        }
+        errs() << "FDCE[" << F->getName() << "]: " << nrofloadstores 
+               << " LS, " << nrofredundant << " skipped\n";
+    }
+    
+    void findRedundantChecks(Instruction *checked, Value *pointer, bool goneThroughGEP) {
+        for (User *U : pointer->users()) {
+            GEPOperator *GEP = dyn_cast<GEPOperator>(U);
+            if (GEP) {
+                findRedundantChecks(checked, GEP, true);
+                continue;
+            }
+            
+            Instruction *loadstore = dyn_cast<Instruction>(U);
+            if (!loadstore || (!isa<LoadInst>(loadstore) && !isa<StoreInst>(loadstore)))
+                continue;
+            
+            StoreInst *SI = dyn_cast<StoreInst>(loadstore);
+            if (SI && SI->getPointerOperand() != pointer) continue;
+            
+            // Safety checks (simplified)
+            if (goneThroughGEP && !PDT->dominates(loadstore->getParent(), checked->getParent()))
+                continue;
+            if (!DT->dominates(checked, loadstore))
+                continue;
+            if (hasInterveningCall(checked, loadstore))
+                continue;
+                
+            if (!FDCEmap.count(loadstore))
+                FDCEmap[loadstore] = checked;
+        }
+    }
+    
+    bool hasInterveningCall(Instruction *start, Instruction *end) {
+        // Simple forward scan (conservative)
+        for (Instruction *I = start->getNextNode(); I && I != end; I = I->getNextNode()) {
+            if (dyn_cast<CallBase>(I)) return true;
+        }
+        return false;
+    }
+
+
 		FidesPass() : ModulePass(ID) {initializeFidesPassPass(*PassRegistry::getPassRegistry());}
 
 // Helper function to check if function has specific annotation
@@ -143,6 +226,27 @@ namespace {
             Module *M = F.getParent();
             GlobalVariable *annotations = M->getGlobalVariable("llvm.global.annotations");
             
+            if(F.getName().contains("fides") || F.getName().contains("llvm") || F.getName().contains("memcpy") || F.getName().contains("realloc")){
+            	return true;
+            }
+
+            auto malloc_names = {"malloc", "_Znam", "_Znwm", "_ZnamRKSt9nothrow_t",
+	                       "_ZnwmRKSt9nothrow_t"};
+	 		auto free_names = {"free", "_ZdaPv", "_ZdlPv", "_ZdaPvRKSt9nothrow_t",
+	                     "_ZdlPvRKSt9nothrow_t"};
+
+	        for (auto name : free_names) {
+    			if(F.getName().contains(name)){
+    				return true;
+    			}
+    		}
+
+    		for (auto name : malloc_names) {
+    			if(F.getName().contains(name)){
+    				return true;
+    			}
+    		}
+
             if (!annotations)
                 return false;
 
@@ -156,7 +260,7 @@ namespace {
                     continue;
 
                 // First operand is the annotated value
-                Value *annotatedValue = CS->getOperand(0)->stripPointerCasts();
+                Value *annotatedValue = dyn_cast<Function>(CS->getOperand(0)->stripPointerCasts());
                 if (annotatedValue != &F)
                     continue;
 
@@ -237,16 +341,25 @@ namespace {
 
     		Value *boundsTableAddr = M.getOrInsertGlobal(boundsTable, Type::getInt64Ty(Ctx));
 
+    	// Build FDCE maps for all functions first
+    	
+    	
+    	int total_insns = 0;
+    	int skipped_insns = 0;
+    	int insert_insns = 0;
+
     	/* Instrument Load-Store instructions. Don't instrument instructions accessing int/float objects */
     	for (auto &F : M){
     		// errs()<<"HI SAI 1\n";
     		Module *m = F.getParent();
-    		if (hasAnnotation(F, "skip_fides_pass")) {
+    		if (hasAnnotation(F, "skip_fides_pass") || F.isDeclaration()) {
     			// skip function processing
     			continue;
-				}
+			}
+			DT = &this->getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
+        	PDT = &this->getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
+        	bbDerefCheck(&F);  // Populates FDCEmap
     		Function *val_memcheck = Intrinsic::getDeclaration(m, Intrinsic::riscv_validate);	// get hash intrinsic declaration
-
 
     		errs()<<"Here 1\n";
 
@@ -254,11 +367,12 @@ namespace {
 				{
 					// Iterate over Instrs in BB
 					for (auto &I : B)
-					{
+					{		
 							// errs()<<"HI SAI 21: "<<I<<"\n";
 							
 							// If instruction is load instruction apply bounds check
 							if (LoadInst *LI = dyn_cast<LoadInst>(&I)){
+                                total_insns++;
 								Value *po = LI->getPointerOperand();
 								if(EnableBoundsCheck){	
 									bool insert_check = true;
@@ -273,8 +387,8 @@ namespace {
 										}	
     							}
 
-    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x90000000ULL, false);
-    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
+    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x80000000ULL, false);
+    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
 									// llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
 									// llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
 
@@ -291,11 +405,18 @@ namespace {
 									// ArrayRef<Value *> args_ref1(args1);
 									// ArrayRef<Value *> args_ref2(args2);
 
+									args1.push_back(zeroConstant);
 									args1.push_back(po);
-									args1.push_back(boundsTableAddr);
+
 									ArrayRef<Value *> args_ref1(args1);
 
+									if(FDCEmap.count(LI)){
+                                        skipped_insns++;
+										continue;
+									}
+
 									if(insert_check){
+										insert_insns++;
 										// Create call to intrinsic
 										IRBuilder<> Builder(LI);
 										Builder.SetInsertPoint(LI);
@@ -306,6 +427,7 @@ namespace {
 								}
 							}
 							if (StoreInst *SI = dyn_cast<StoreInst>(&I)){
+                                total_insns++;
 								Value *po = SI->getPointerOperand();
 								if(EnableBoundsCheck){
 									bool insert_check = true;
@@ -319,10 +441,10 @@ namespace {
 												insert_check = false;
 											}
 										}	
-    							}
+    								}
 
-    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x80500000ULL, false);
-    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
+    							// llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x80000000ULL, false);
+    							llvm::Constant *zeroConstant = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x0ULL, false);
 									// llvm::Constant *temporalCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x2ULL, false);
 									// llvm::Constant *spatialCheck = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x1ULL, false);
 
@@ -338,12 +460,19 @@ namespace {
 									// ArrayRef<Value *> args_ref2(args2);
 
 									std::vector<Value *> args1;
+									
+									args1.push_back(zeroConstant);
 									args1.push_back(po);
-									args1.push_back(boundsTableAddr);
 
 									ArrayRef<Value *> args_ref1(args1);
 
+									if(FDCEmap.count(SI)){
+                                        skipped_insns++;
+										continue;
+									}
+
 									if(insert_check){
+										insert_insns++;
 										// Create call to intrinsic
 										IRBuilder<> Builder(SI);
 										Builder.SetInsertPoint(SI);
@@ -362,9 +491,15 @@ namespace {
 							// }
 	    			}
     			}
-    		}	
+    		}
 
-    	errs()<<"Here 2\n";
+    	errs()<<"Total LD/ST insns = "<<total_insns<<"\n";
+    	errs()<<"Inserted insns = "<<insert_insns<<"\n";
+        errs()<<"Skipped insns = "<<skipped_insns<<"\n";
+    	// if(insert_insns){
+	    	// errs()<<"Efficiency = "<<(double)(total_insns-insert_insns)/(double)(total_insns)*100<<"\n";
+		// }
+    	// errs()<<"Here 2\n";
 
     	if(!EnableBoundsCheck){
     		return 0;
@@ -373,21 +508,34 @@ namespace {
     	std::vector<CallInst*> CIToInstrument;
     	for (auto &F : M){
     		Module *m = F.getParent();
+
     		errs()<<"function name: "<<F.getName()<<" : "<<hasAnnotation(F, "skip_fides_pass")<<"\n";
     		if (hasAnnotation(F, "skip_fides_pass")) {
     			// skip function processing
+    			// errs()<<"Skipped\n";
     			continue;
-				}
-				
+			}
+			// errs()<<"Not Skipped\n";	
     		for (auto &B : F)
 				{
 					// Iterate over Instrs in BB
 					for (auto &I : B)
 					{
+						// errs()<<"Inside BB\n";
 						if(auto *CI = dyn_cast<CallInst>(&I)){
+							auto *callee = CI->getCalledFunction();
+							if(!callee){
+								Value *calledOp = CI->getCalledOperand();
+								 if (!dyn_cast<InlineAsm>(calledOp)){
+									// errs()<<"Insert : "<<*CI<<"\n";
+								// errs()<<CI->getCalledFunction()->getName()<<"\n";
+									CIToInstrument.push_back(CI);
+								}
+								continue;
+							}
 							if(!(CI->getCalledFunction()->getName().contains("fides") || CI->getCalledFunction()->getName().contains("llvm") || 
 								CI->getCalledFunction()->getName().contains("memcpy"))){
-								errs()<<"Insert : "<<*CI<<"\n";
+								// errs()<<"Insert : "<<*CI<<"\n";
 								errs()<<CI->getCalledFunction()->getName()<<"\n";
 								CIToInstrument.push_back(CI);
 							}
@@ -402,8 +550,11 @@ namespace {
 
 			Value *maxStackID = NULL;
 
+			errs()<<"Now in stack insertion\n";
+
     	for (auto &F : M){
     		Module *m = F.getParent();
+    		// errs()<<"function name: "<<F.getName()<<" : "<<hasAnnotation(F, "skip_fides_pass")<<"\n";
     		if (hasAnnotation(F, "skip_fides_pass")) {
     			// skip function processing
     			continue;
@@ -427,26 +578,41 @@ namespace {
 								// ArrayRef<Value *> args_ref(args);
 								maxStackID = Builder.CreateCall(FidesMaxStackIdRead, {}, "");
 								// errs()<<*(AI->getNextNode())<<"\n last:\n "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
+								for (auto *CI : CIToInstrument){
+									if((CI->getParent()->getParent()) == &F){
+										IRBuilder<> Builder(CI->getNextNode());
+										// errs()<<"Insert before : "<<*CI<<" : "<<*CI->getNextNode()<<"\n";
+										std::vector<Value *> args_stack_id;
+										args_stack_id.push_back(maxStackID);
+										ArrayRef<Value *> args_ref_stack_id(args_stack_id);
+										Builder.CreateCall(FidesMaxStackIdWrite, args_ref_stack_id,"");
+									}
+								}
+
 							}
 						}
 					}
 				}
 			}
 
+		errs()<<"Now in tagged stack pointer \n";
     	for (auto &F : M){
     		Module *m = F.getParent();
     		if (hasAnnotation(F, "skip_fides_pass")) {
     			// skip function processing
     			continue;
-				}
+			}
+			errs()<<"\nConverting stack pointers in Function "<<F.getName();
     		for (auto &B : F)
-				{
+			{		
 					// Iterate over Instrs in BB
 					for (auto &I : B)
 					{
 						if(auto *AI = dyn_cast<AllocaInst>(&I)){
 							// Insert metadata if stack object allocated is an Aggregate type(union, struct, array)
+							errs()<<"HEre\n";
 							IRBuilder<> Builder(AI->getNextNode());
+
 							if(AI->getAllocatedType()->isAggregateType()){
 								
 								std::vector<User*> Users(AI->user_begin(), AI->user_end());
@@ -464,9 +630,9 @@ namespace {
 								Value *taggedStackPointerInt = Builder.CreateCall(FidesStackObjCreate, args_ref,"");
 								Value *taggedStackPointer = Builder.CreateIntToPtr(taggedStackPointerInt, AI->getType(), "");
 							
-								// errs()<<*(AI)<<" : "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
+								errs()<<*(AI)<<" : "<<*AI->getAllocatedType()<<":"<<*AI->getType()<<" : isArray = "<<AI->getAllocatedType()->isArrayTy()<<" : isStruct = "<<AI->getAllocatedType()->isStructTy()<<" : isAggregate = "<<AI->getAllocatedType()->isAggregateType()<<" : size = "<<(AI->getAllocationSizeInBits(m->getDataLayout())).getValue()/8<<"\n";
 								for (User *U : Users){
-									// errs()<<*U<<" <--> ";
+									errs()<<*U<<" <--> ";
         					U->replaceUsesOfWith(AI, taggedStackPointer);
 								}
 
@@ -488,14 +654,59 @@ namespace {
 				}
 			}
 
-			for (auto *CI : CIToInstrument){
-				IRBuilder<> Builder(CI->getNextNode());
-				errs()<<"Insert before : "<<*CI<<" : "<<*CI->getNextNode()<<"\n";
-				std::vector<Value *> args_stack_id;
-				args_stack_id.push_back(maxStackID);
-				ArrayRef<Value *> args_ref_stack_id(args_stack_id);
-				Builder.CreateCall(FidesMaxStackIdWrite, args_ref_stack_id,"");
-			}
+            int cmp_ops = 0;
+            
+            // Stripping icmp instruction metadata
+            for (auto &F : M){
+                Module *m = F.getParent();
+                if (hasAnnotation(F, "skip_fides_pass")) {
+                    // skip function processing
+                    continue;
+                }
+                errs()<<"\nConverting stack pointers in Function "<<F.getName();
+                for (auto &B : F)
+                {   
+                    for(auto &I : B){
+                        if (auto *CMPI = dyn_cast<ICmpInst>(&I)){
+                            Value *po1 = CMPI->getOperand(0);
+                            Value *po2 = CMPI->getOperand(1);
+                            if(dyn_cast<PointerType>(po1->getType())){
+                                cmp_ops++;
+                                IRBuilder<> Builder(CMPI);
+                                Builder.SetInsertPoint(CMPI);
+                                
+                                llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x00000000FFFFFFFFULL, false);
+                                llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0xFFFFFFFF00000000ULL, false);
+
+                                auto addressInt = Builder.CreatePtrToInt(po1, Type::getInt64Ty(Ctx), "addressInt");
+                                auto strippedAddress = Builder.CreateAnd(addressInt, stripUpperMask, "strippedAddress");
+                                auto resultAddress = Builder.CreateIntToPtr(strippedAddress, po1->getType(), "resultAddr");
+
+                                CMPI->setOperand(0, resultAddress);
+                            }
+                            if(dyn_cast<PointerType>(po2->getType())){
+                                cmp_ops++;
+                                IRBuilder<> Builder(CMPI);
+                                Builder.SetInsertPoint(CMPI);
+                                
+                                llvm::Constant *stripUpperMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0x00000000FFFFFFFFULL, false);
+                                llvm::Constant *stripLowerMask = llvm::ConstantInt::get(Type::getInt64Ty(Ctx), 0xFFFFFFFF00000000ULL, false);
+
+                                auto addressInt = Builder.CreatePtrToInt(po2, Type::getInt64Ty(Ctx), "addressInt");
+                                auto strippedAddress = Builder.CreateAnd(addressInt, stripUpperMask, "strippedAddress");
+                                auto resultAddress = Builder.CreateIntToPtr(strippedAddress, po2->getType(), "resultAddr");
+
+                                CMPI->setOperand(1, resultAddress);
+                            }
+                        }
+                    }
+                }
+            }
+        
+
+
+            errs()<<"Total incompatible comparison operation : "<<cmp_ops<<"\n";
+			errs()<<"Finished Fides ms pass\n";
 
 			// for (int i =0; i<low_contours; i++){
 			// 	i =
@@ -533,6 +744,8 @@ namespace {
 			// 	}
 			// }
     		/* Setting code compartment metadata */
+    		
+/*
     		std::string source_filename_with_ext(M.getSourceFileName());
 			std::string source_filename(M.getSourceFileName());
 			fides_initialize_compartment_map(sanitize(source_filename_with_ext, '/'));
@@ -560,8 +773,9 @@ namespace {
 			    	F.setPrefixData(compartmentPrefix);
 			  	}
 			}
-
+*/
     		// modified =  true
+    		errs()<<"Good bye\n";
 			return true;
 		}
 	};
@@ -578,6 +792,8 @@ INITIALIZE_PASS_BEGIN(FidesPass,
                       "fides",
                       "Memory safety transforms", false, false)
 INITIALIZE_PASS_DEPENDENCY(ADCELegacyPass)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(PostDominatorTreeWrapperPass)
 INITIALIZE_PASS_END(FidesPass,
                       "fides",
                       "Memory safety transforms", false, false)
